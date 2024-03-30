@@ -385,18 +385,33 @@ int main(void)
 
 	// Log example
 	{
+		// Create an AlarmLog message
 		AlarmLog writeLog;
+		writeLog.date.day = 31;
+		writeLog.date.month = 12;
+		writeLog.date.year = 2024;
 		writeLog.logType = Log::LogType::ALARM;
-		writeLog.alarmValue = 123;
+		writeLog.alarmValue = 0x11223344;
 
 		// Write log to stringstream
 		stringstream ss(ios::in | ios::out | ios::binary);
 		ms.write(ss, writeLog);
 
+		// Copy outgoing stringstream data bytes to a raw character buffer for transmission
+		auto size = ss.tellp();
+		char* binary_buf = static_cast<char*>(malloc(size));
+		ss.rdbuf()->sgetn(binary_buf, size);
+
+		// TODO: Send binary_buf to somewhere
+		// TODO: Receive binary_buf from somewhere
+
+		// Convert incoming bytes to a stream for parsing
+		istringstream is(std::string(binary_buf, size), std::ios::in | std::ios::binary);
+
 		// Read log from stringstream
 		AlarmLog readLog;
-		ms.read(ss, readLog);
-		if (ss.good())
+		ms.read(is, readLog);
+		if (is.good())
 		{
 			// Parse succeeded; use readLog values
 			cout << "AlarmLog Parse Success! " << readLog.alarmValue << endl;
@@ -405,6 +420,8 @@ int main(void)
 		{
 			cout << "ERROR: AlarmLog" << endl;
 		}
+
+		free(binary_buf);
 	}
 
 	// File example

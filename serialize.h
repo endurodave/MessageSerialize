@@ -107,7 +107,7 @@ public:
     public:
 		/// Inheriting class implements the write function. Write each
 		/// class member to the ostream. Write in the same order as read().
-		/// Each level within the heirarchy must implement. Ensure base 
+		/// Each level within the hierarchy must implement. Ensure base 
 		/// write() implementation is called if necessary. 
 		/// @param[in] ms - the message serialize instance
 		/// @param[in] is - the input stream
@@ -116,7 +116,7 @@ public:
 
 		/// Inheriting class implements the read function. Read each
 		/// class member to the ostream. Read in the same order as write().
-		/// Each level within the heirarchy must implement. Ensure base 
+		/// Each level within the hierarchy must implement. Ensure base 
 		/// read() implementation is called if necessary. 
         /// @param[in] ms - the message serialize instance
 		/// @param[in] is - the input stream

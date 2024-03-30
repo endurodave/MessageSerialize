@@ -3,11 +3,11 @@ A simple serialize class to binary serialize and deserialize C++ objects.
 
 ## Introduction
 
-The `serialize` class can be used to serialize and deserialize structured data into a binary format suitable for communication protocols, data storage, and inter-process communication (IPC). A single header file `serialize.h` implements the serialize functionality.
+The `serialize` class can be used to serialize and deserialize structured data into a binary format suitable for communication protocols, data storage, and inter-process communication (IPC). The STL Input/Output Stream Library is used to hold the encoded octet streams in readiness for transmission or parsing. A single header file `serialize.h` implements the serialize functionality. Any C++14 or higher compiler is supported.
 
 1. **Purpose:** The serialize class is designed to provide a framework for serializing and deserializing C++ objects into binary format, enabling data interchange between different systems or storage mediums.
 
-1. **Interface:** The class provides an abstract interface `I` that all serialized user-defined classes must implement. This interface consists of write and read functions, responsible for writing class members to an output stream and reading them from an input stream, respectively.
+1. **Interface:** The class provides an abstract interface `serialize::I` that all serialized user-defined classes must implement. This interface consists of `write` and `read` functions, responsible for writing class members to an output stream and reading them from an input stream, respectively.
 
 1. **Supported Data Types:** The serialize class supports various C++ data types for serialization, including literals, strings (`std::string` and `std::wstring`), vectors, maps, lists, sets, and character arrays (`char[]`).
 
@@ -19,7 +19,19 @@ The `serialize` class can be used to serialize and deserialize structured data i
 
 1. **Serialization and Deserialization Functions:** The class provides specialized read and write functions for different data types, including user-defined types, strings, vectors (including `std::vector<bool>`), and character arrays.
 
-1. **Template Function for Built-in Types:** It includes a template function for reading/writing built-in types (`T`) from/to streams, handling pointers and non-pointer types differently.
+## Purpose 
+
+Numerous libraries are available for encoding transport payloads. The `serialize` class has a few advantages: 
+
+1. **Simplicity:** A single header file with less than 1000 source lines of code.
+
+1. **Ease of Use:** Inherit from `serialize::I` and override `write()` and `read()`; that's it. 
+
+1. **Flexibility:** Serialize built-in or user defined data types, and STL data containers (e.g. `std::list`, `std::string`).
+
+1. **Efficiency:** Binary encoding efficiently serializes/deserializes messages using STL streams.
+
+1. **Robustness:** Automatic endianness handling and parser resilience to message changes over time. 
 
 ## Example Usage
 
@@ -47,16 +59,6 @@ public:
 		ms.read(is, month);
 		ms.read(is, year);
 		return is;
-	}
-
-	// Define less-than operator
-	bool operator<(const Date& other) const 
-	{
-		if (year != other.year)
-			return year < other.year;
-		if (month != other.month)
-			return month < other.month;
-		return day < other.day;
 	}
 
 	int16_t day = 0;
@@ -116,29 +118,46 @@ public:
 };
 ```
 
-At runtime, serialize and deserialize an `AlarmLog` object to a `std::stringstream`. Check stream `good()` to ensure parsing success before using object data. The data bytes within the stream can be sent over a communication protocol, for instance.
+The code snippet below demonstrates creating, transmitting, and receiving a binary-encoded `AlarmLog` message. At runtime, serialize and deserialize an `AlarmLog` object to a `std::stringstream`. Check stream `good()` to ensure parsing success before using object data. The data bytes within the stream can be sent as a communication protocol payload, for instance.
 
 ```cpp
+// Create an AlarmLog message
 AlarmLog writeLog;
+writeLog.date.day = 31;
+writeLog.date.month = 12;
+writeLog.date.year = 2024;
 writeLog.logType = Log::LogType::ALARM;
-writeLog.alarmValue = 123;
+writeLog.alarmValue = 0x11223344;
 
 // Write log to stringstream
 stringstream ss(ios::in | ios::out | ios::binary);
 ms.write(ss, writeLog);
 
+// Copy outgoing stringstream data bytes to a raw character buffer for transmission
+auto size = ss.tellp();
+char* binary_buf = static_cast<char*>(malloc(size));
+ss.rdbuf()->sgetn(binary_buf, size);
+
+// TODO: Send binary_buf to somewhere
+// TODO: Receive binary_buf from somewhere
+
+// Convert incoming bytes to a stream for parsing
+istringstream is(std::string(binary_buf, size), std::ios::in | std::ios::binary);
+
 // Read log from stringstream
 AlarmLog readLog;
-ms.read(ss, readLog);
-if (ss.good())
+ms.read(is, readLog);
+if (is.good())
 {
-    // Parse succeeded; use readLog values
-    cout << "AlarmLog Parse Success! " << readLog.alarmValue << endl;
+	// Parse succeeded; use readLog values
+	cout << "AlarmLog Parse Success! " << readLog.alarmValue << endl;
 }
 else
 {
-    cout << "ERROR: AlarmLog" << endl;
+	cout << "ERROR: AlarmLog" << endl;
 }
+
+free(binary_buf);
 ```
 
 `AllData` shows more examples using C++ container classes such as `std::list`, character arrays, and more.
@@ -238,35 +257,35 @@ public:
 		return is;
 	}
 
-	int valueInt = 4;
-	int8_t valueInt8 = 8;
-	int16_t valueInt16 = 16;
-	int32_t valueInt32 = 32;
-	int64_t valueInt64 = 64;
-	uint8_t valueUInt8 = 8;
-	uint16_t valueUInt16 = 16;
-	uint32_t valueUInt32 = 32;
-	uint64_t valueUInt64 = 64;
-	float valueFloat = 1.23f;
-	double valueDouble = 3.21;
-	Color color = Color::BLUE;
-	char cstr[32] = { 0 };
-	string str;
-	wstring wstr;
-	vector<bool> dataVectorBool;
-	vector<float> dataVectorFloat;
-	vector<Date*> dataVectorPtr;
-	vector<Date> dataVectorValue;
-	vector<int> dataVectorInt;
+    int valueInt = 4;
+    int8_t valueInt8 = 8;
+    int16_t valueInt16 = 16;
+    int32_t valueInt32 = 32;
+    int64_t valueInt64 = 64;
+    uint8_t valueUInt8 = 8;
+    uint16_t valueUInt16 = 16;
+    uint32_t valueUInt32 = 32;
+    uint64_t valueUInt64 = 64;
+    float valueFloat = 1.23f;
+    double valueDouble = 3.21;
+    Color color = Color::BLUE;
+    char cstr[32] = { 0 };
+    string str;
+    wstring wstr;
+    vector<bool> dataVectorBool;
+    vector<float> dataVectorFloat;
+    vector<Date*> dataVectorPtr;
+    vector<Date> dataVectorValue;
+    vector<int> dataVectorInt;
     list<Date*> dataListPtr;
     list<Date> dataListValue;
     list<int> dataListInt;
-	map<int, Date*> dataMapPtr;
-	map<int, Date> dataMapValue;
-	map<int, int> dataMapInt;
-	set<Date*> dataSetPtr;
-	set<Date> dataSetValue;
-	set<int> dataSetInt;
+    map<int, Date*> dataMapPtr;
+    map<int, Date> dataMapValue;
+    map<int, int> dataMapInt;
+    set<Date*> dataSetPtr;
+    set<Date> dataSetValue;
+    set<int> dataSetInt;
 };
 ```
 
@@ -373,7 +392,195 @@ For message protocol resiliency to message changes to work, certain code change 
 
 ## Endianness
 
-The `serialize` class automatically handles endianness byte swapping to support communication protocols between different CPU architectures.
+The C++ built-in data types are sent big-endian. Multibyte built-in data types are encoded in multiple octets. Each octet is 8-bits. All built-in multibyte data types are byte swapped for endianness by the sender or receiver as necessary based upon the detected CPU endianness. The serialize class automatically performs the byte swapping when marshalling the octet stream. No alignment bytes are added to the octet stream regardless of the built-in data type size. 
 
+## Transport Protocol
 
+The `serialize` binary output stream is typically used for a protocol payload. See the link below for an a compact, C language simple socket-like transport protocol with easy porting to any system.
 
+[Simple Socket Protocol](https://github.com/endurodave/SimpleSocketProtocol)
+
+## Implementation
+
+All user defined data types inherit from `serialize::I`:
+
+```cpp
+class serialize
+{
+public:
+	/// @brief Abstract interface that all serialized user defined classes inherit.
+    class I
+    {
+    public:
+		/// Inheriting class implements the write function. Write each
+		/// class member to the ostream. Write in the same order as read().
+		/// Each level within the hierarchy must implement. Ensure base 
+		/// write() implementation is called if necessary. 
+		/// @param[in] ms - the message serialize instance
+		/// @param[in] is - the input stream
+		/// @return The input stream
+        virtual std::ostream& write(serialize& ms, std::ostream& os) = 0;
+
+		/// Inheriting class implements the read function. Read each
+		/// class member to the ostream. Read in the same order as write().
+		/// Each level within the hierarchy must implement. Ensure base 
+		/// read() implementation is called if necessary. 
+        /// @param[in] ms - the message serialize instance
+		/// @param[in] is - the input stream
+		/// @return The input stream
+        virtual std::istream& read(serialize& ms, std::istream& is) = 0;
+    };
+```
+
+Numerous `serialize` overloads handle `write`/`read` of different data types:
+
+```cpp
+// Write APIs
+std::ostream& write(std::ostream& os, std::string& s) { ... }
+
+std::ostream& write (std::ostream& os, const std::wstring& s) { ... }
+
+template <class T>
+std::ostream& write(std::ostream& os, std::vector<T>& container) { ... }
+
+template <class K, class V, class P>
+std::ostream& write(std::ostream& os, std::map<K, V, P>& container) { ... }
+// ...
+
+// Read APIs
+std::istream& read (std::istream& is, std::string& s) { ... }
+
+std::istream& read (std::istream& is, std::wstring& s) { ... }
+
+template <class T>
+std::istream& read(std::istream& is, std::vector<T>& container) { ... }
+
+template <class K, class V, class P>
+std::istream& read(std::istream& is, std::map<K, V, P>& container) { ... }
+// ...
+```
+
+### Encoding
+
+Each data types is prepended with an 8-bit type:
+
+```cpp
+enum class Type 
+{
+	UNKNOWN = 0,
+	LITERAL = 1,
+	STRING = 8,
+	WSTRING = 9,
+	VECTOR = 20,
+	MAP = 21,
+	LIST = 22,
+	SET = 23,
+	ENDIAN = 30,
+	USER_DEFINED = 31,
+};
+```
+
+### Primitive Data Type Encoding
+
+The `struct` definitions below are used to conveying the serialized data memory layout for primitive data types. The structures themselves do not exist within the source code. 
+
+For instance, a `short` is encoded as an 8-bit `Type` followed by 16-bit `short` value.
+
+```cpp
+struct short_data {
+   Type type = LITERAL;	// 8-bits
+   short s;				// 16-bits
+};
+```
+
+Similarly, a `long` encoding is shown below.
+
+```cpp
+struct long_data {
+   Type type = LITERAL;	// 8-bits
+   long l;				// 32-bits
+};
+```
+
+All other numeric primitive data types are encoded similarly (e.g. float, double, unsigned long, ...). Primitive numeric data types are automatically byte swapped to handle endianness.
+
+`char[]` string encoding (null terminated):
+
+```cpp
+struct char_arr_data {
+   Type type = STRING; 		// 8-bits
+   unsigned short size; 	// 16-bits, size is strlen() + 1 
+   char str[length];		// size x 8-bits
+};
+```
+
+Do not use arrays of numeric values (e.g. `float[]`). Instead, use STL container classes (e.g. `std::list<float>`).
+
+### STL Container Encoding
+
+`xstring` encoding:
+```cpp
+struct string_data {
+   Type type = STRING; 		// 8-bits
+   unsigned short size; 	// 16-bits, size is std::string::size()  
+   char str[size];			// size x 8-bits
+};
+```
+
+`xwstring` encoding:
+```cpp
+struct wstring_data {
+   Type type = WSTRING; 	// 8-bits
+   unsigned short size; 	// 16-bits, size is std::wstring::size()  
+   wchar_t str[size];		// size x 16-bits
+};
+```
+
+`std::list<T>` encoding:
+```cpp
+struct list_data {
+   Type type = LIST; 		// 8-bits
+   unsigned short size; 	// 16-bits, size is std::list::size()
+   T data[size];			// size x sizeof(T) x 8-bits 
+};
+```
+
+`std::list<T&>` encoding:
+```cpp
+struct list_ref_data {
+   Type type = LIST; 		// 8-bits
+   unsigned short size;		// 16-bits, size is std::list::size()
+   T data[size];			// size x sizeof(T) bits x 8-bits
+};
+```
+
+`std::list<T*>` encoding:
+```cpp
+struct list_ptr_data {
+   Type type = LIST; 		// 8-bits
+   unsigned short size; 	// 16-bits, size is std::list::size()
+   T data[size];			// size x sizeof(T*) x 8-bits
+};
+```
+
+The `std::map`, `std::set`, `std::vector` all follow a similar binary encoding mechanism to `std::list`. 
+
+### User Defined Encoding
+
+Any user defined class that inherits from `serialize::I`. The size of a user defined type depends on the number of octets required to serialize the object (not `sizeof(T)`). The size is the total octet count of all data fields contained within the user defined object instance. 
+
+```cpp
+struct user_defined_data {
+   Type type = USER_DEFINED;	// 8-bits
+   unsigned short size; 		// 16-bits, total size of message object octets
+   char data[size];				// size is the number of message object octets serialized
+};
+```
+
+Each user defined object is the aggregate octet count from any combination of:
+
+* Primitive data types
+* Container data types
+* User defined data types
+
+Any complex message object topology using inheritance and/or composition is supported.
