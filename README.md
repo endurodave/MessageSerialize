@@ -329,7 +329,7 @@ int main(void)
 ```
 Check for errors with `getLastError()` to get the last parse error code.
 
-## Interoperability
+## Protocol Evolution
 
 The `serialize` class parsing handles deserializing objects even if the number of object data fields don’t match the ones known at compile time due to protocol changes. 
 
