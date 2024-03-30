@@ -41,29 +41,29 @@ C++ objects inherit from `serialize::I` to support serialize and deserialize. Me
 class Date : public serialize::I
 {
 public:
-	Date() = default;
-	Date(int16_t d, int16_t m, int16_t y) : day(d), month(m), year(y) {}
-	virtual ~Date() = default;
+    Date() = default;
+    Date(int16_t d, int16_t m, int16_t y) : day(d), month(m), year(y) {}
+    virtual ~Date() = default;
 
-	virtual ostream& write(serialize& ms, ostream& os) override
-	{
-		ms.write(os, day);
-		ms.write(os, month);
-		ms.write(os, year);
-		return os;
-	}
+    virtual ostream& write(serialize& ms, ostream& os) override
+    {
+        ms.write(os, day);
+        ms.write(os, month);
+        ms.write(os, year);
+        return os;
+    }
 
-	virtual istream& read(serialize& ms, istream& is) override
-	{
-		ms.read(is, day);
-		ms.read(is, month);
-		ms.read(is, year);
-		return is;
-	}
+    virtual istream& read(serialize& ms, istream& is) override
+    {
+        ms.read(is, day);
+        ms.read(is, month);
+        ms.read(is, year);
+        return is;
+    }
 
-	int16_t day = 0;
-	int16_t month = 0;
-	int16_t year = 0;
+    int16_t day = 0;
+    int16_t month = 0;
+    int16_t year = 0;
 };
 ```
 
@@ -73,24 +73,24 @@ public:
 class Log : public serialize::I
 {
 public:
-	enum class LogType : uint16_t { ALARM, DIAGNOSTIC };
+    enum class LogType : uint16_t { ALARM, DIAGNOSTIC };
 
-	virtual ostream& write(serialize& ms, ostream& os) override
-	{
-		ms.write(os, logType);
-		ms.write(os, date);
-		return os;
-	}
+    virtual ostream& write(serialize& ms, ostream& os) override
+    {
+        ms.write(os, logType);
+        ms.write(os, date);
+        return os;
+    }
 
-	virtual istream& read(serialize& ms, istream& is) override
-	{
-		ms.read(is, logType);
-		ms.read(is, date);
-		return is;
-	}
+    virtual istream& read(serialize& ms, istream& is) override
+    {
+        ms.read(is, logType);
+        ms.read(is, date);
+        return is;
+    }
 
-	LogType logType = LogType::ALARM;
-	Date date;
+    LogType logType = LogType::ALARM;
+    Date date;
 };
 ```
 
@@ -100,21 +100,21 @@ public:
 class AlarmLog : public Log
 {
 public:
-	virtual ostream& write(serialize& ms, ostream& os) override
-	{
-		Log::write(ms, os);
-		ms.write(os, alarmValue);
-		return os;
-	}
+    virtual ostream& write(serialize& ms, ostream& os) override
+    {
+        Log::write(ms, os);
+        ms.write(os, alarmValue);
+        return os;
+    }
 
-	virtual istream& read(serialize& ms, istream& is) override
-	{
-		Log::read(ms, is);
-		ms.read(is, alarmValue);
-		return is;
-	}
+    virtual istream& read(serialize& ms, istream& is) override
+    {
+        Log::read(ms, is);
+        ms.read(is, alarmValue);
+        return is;
+    }
 
-	uint32_t alarmValue = 0;
+    uint32_t alarmValue = 0;
 };
 ```
 
@@ -149,12 +149,12 @@ AlarmLog readLog;
 ms.read(is, readLog);
 if (is.good())
 {
-	// Parse succeeded; use readLog values
-	cout << "AlarmLog Parse Success! " << readLog.alarmValue << endl;
+    // Parse succeeded; use readLog values
+    cout << "AlarmLog Parse Success! " << readLog.alarmValue << endl;
 }
 else
 {
-	cout << "ERROR: AlarmLog" << endl;
+    cout << "ERROR: AlarmLog" << endl;
 }
 
 free(binary_buf);
@@ -166,96 +166,96 @@ free(binary_buf);
 class AllData : public serialize::I
 {
 public:
-	AllData() = default;
-	virtual ~AllData()
-	{
-		for (auto& ptr : dataVectorPtr) 
-			delete ptr;
-		dataVectorPtr.clear();
+    AllData() = default;
+    virtual ~AllData()
+    {
+        for (auto& ptr : dataVectorPtr) 
+            delete ptr;
+        dataVectorPtr.clear();
 
-		for (auto& ptr : dataListPtr)
-			delete ptr;
-		dataListPtr.clear();
+        for (auto& ptr : dataListPtr)
+            delete ptr;
+        dataListPtr.clear();
 
-		for (auto& ptr : dataMapPtr)
-			delete ptr.second;
-		dataMapPtr.clear();
+        for (auto& ptr : dataMapPtr)
+            delete ptr.second;
+        dataMapPtr.clear();
 
-		for (auto& ptr : dataSetPtr)
-			delete ptr;
-		dataSetPtr.clear();
-	}
+        for (auto& ptr : dataSetPtr)
+            delete ptr;
+        dataSetPtr.clear();
+    }
 
-	AllData(const AllData& other) = delete;
-	AllData& operator=(const AllData& other) = delete;
+    AllData(const AllData& other) = delete;
+    AllData& operator=(const AllData& other) = delete;
 
-	virtual ostream& write(serialize& ms, ostream& os)
-	{
-		ms.write(os, valueInt);
-		ms.write(os, valueInt8);
-		ms.write(os, valueInt16);
-		ms.write(os, valueInt32);
-		ms.write(os, valueInt64);
-		ms.write(os, valueUInt8);
-		ms.write(os, valueUInt16);
-		ms.write(os, valueUInt32);
-		ms.write(os, valueUInt64);
-		ms.write(os, valueFloat);
-		ms.write(os, valueDouble);
-		ms.write(os, color);
-		ms.write(os, cstr);
-		ms.write(os, str);
-		ms.write(os, wstr);
-		ms.write(os, dataVectorBool);
-		ms.write(os, dataVectorFloat);
-		ms.write(os, dataVectorPtr);
-		ms.write(os, dataVectorValue);
-		ms.write(os, dataVectorInt);
-		ms.write(os, dataListPtr);
-		ms.write(os, dataListValue);
-		ms.write(os, dataListInt);
-		ms.write(os, dataMapPtr);
-		ms.write(os, dataMapValue);
-		ms.write(os, dataMapInt);
-		ms.write(os, dataSetPtr);
-		ms.write(os, dataSetValue);
-		ms.write(os, dataSetInt);
-		return os;
-	}
+    virtual ostream& write(serialize& ms, ostream& os)
+    {
+        ms.write(os, valueInt);
+        ms.write(os, valueInt8);
+        ms.write(os, valueInt16);
+        ms.write(os, valueInt32);
+        ms.write(os, valueInt64);
+        ms.write(os, valueUInt8);
+        ms.write(os, valueUInt16);
+        ms.write(os, valueUInt32);
+        ms.write(os, valueUInt64);
+        ms.write(os, valueFloat);
+        ms.write(os, valueDouble);
+        ms.write(os, color);
+        ms.write(os, cstr);
+        ms.write(os, str);
+        ms.write(os, wstr);
+        ms.write(os, dataVectorBool);
+        ms.write(os, dataVectorFloat);
+        ms.write(os, dataVectorPtr);
+        ms.write(os, dataVectorValue);
+        ms.write(os, dataVectorInt);
+        ms.write(os, dataListPtr);
+        ms.write(os, dataListValue);
+        ms.write(os, dataListInt);
+        ms.write(os, dataMapPtr);
+        ms.write(os, dataMapValue);
+        ms.write(os, dataMapInt);
+        ms.write(os, dataSetPtr);
+        ms.write(os, dataSetValue);
+        ms.write(os, dataSetInt);
+        return os;
+    }
 
-	virtual istream& read(serialize& ms, istream& is)
-	{
-		ms.read(is, valueInt);
-		ms.read(is, valueInt8);
-		ms.read(is, valueInt16);
-		ms.read(is, valueInt32);
-		ms.read(is, valueInt64);
-		ms.read(is, valueUInt8);
-		ms.read(is, valueUInt16);
-		ms.read(is, valueUInt32);
-		ms.read(is, valueUInt64);
-		ms.read(is, valueFloat);
-		ms.read(is, valueDouble);
-		ms.read(is, color);
-		ms.read(is, cstr);
-		ms.read(is, str);
-		ms.read(is, wstr);
-		ms.read(is, dataVectorBool);
-		ms.read(is, dataVectorFloat);
-		ms.read(is, dataVectorPtr);
-		ms.read(is, dataVectorValue);
-		ms.read(is, dataVectorInt);
-		ms.read(is, dataListPtr);
-		ms.read(is, dataListValue);
-		ms.read(is, dataListInt);
-		ms.read(is, dataMapPtr);
-		ms.read(is, dataMapValue);
-		ms.read(is, dataMapInt);
-		ms.read(is, dataSetPtr);
-		ms.read(is, dataSetValue);
-		ms.read(is, dataSetInt);
-		return is;
-	}
+    virtual istream& read(serialize& ms, istream& is)
+    {
+        ms.read(is, valueInt);
+        ms.read(is, valueInt8);
+        ms.read(is, valueInt16);
+        ms.read(is, valueInt32);
+        ms.read(is, valueInt64);
+        ms.read(is, valueUInt8);
+        ms.read(is, valueUInt16);
+        ms.read(is, valueUInt32);
+        ms.read(is, valueUInt64);
+        ms.read(is, valueFloat);
+        ms.read(is, valueDouble);
+        ms.read(is, color);
+        ms.read(is, cstr);
+        ms.read(is, str);
+        ms.read(is, wstr);
+        ms.read(is, dataVectorBool);
+        ms.read(is, dataVectorFloat);
+        ms.read(is, dataVectorPtr);
+        ms.read(is, dataVectorValue);
+        ms.read(is, dataVectorInt);
+        ms.read(is, dataListPtr);
+        ms.read(is, dataListValue);
+        ms.read(is, dataListInt);
+        ms.read(is, dataMapPtr);
+        ms.read(is, dataMapValue);
+        ms.read(is, dataMapInt);
+        ms.read(is, dataSetPtr);
+        ms.read(is, dataSetValue);
+        ms.read(is, dataSetInt);
+        return is;
+    }
 
     int valueInt = 4;
     int8_t valueInt8 = 8;
@@ -307,20 +307,20 @@ static serialize ms;
 
 void ErrorHandlerCallback(serialize::ParsingError error, int line, const char* file)
 {
-	// Output parsing error message
-	cout << "PARSE ERROR: " << file << " " << line << " " << static_cast<int>(error) << endl;
+    // Output parsing error message
+    cout << "PARSE ERROR: " << file << " " << line << " " << static_cast<int>(error) << endl;
 }
 
 void ParseHandlerCallback(const type_info& typeId, size_t size)
 {
-	// Output parser progress
-	cout << typeId.name() << " " << size << endl;
+    // Output parser progress
+    cout << typeId.name() << " " << size << endl;
 }
 
 int main(void)
 {
-	ms.setErrorHandler(&ErrorHandlerCallback);
-	ms.setParseHandler(&ParseHandlerCallback);
+    ms.setErrorHandler(&ErrorHandlerCallback);
+    ms.setParseHandler(&ParseHandlerCallback);
 
     //...
 
@@ -340,18 +340,18 @@ For instance, assume protocol version 1 data structure:
 class DataV1 : public serialize::I
 {
 public:
-	virtual ostream& write(serialize& ms, ostream& os) override
-	{
-		ms.write(os, data);
-		return os;
-	}
+    virtual ostream& write(serialize& ms, ostream& os) override
+    {
+        ms.write(os, data);
+        return os;
+    }
 
-	virtual istream& read(serialize& ms, istream& is) override
-	{
-		ms.read(is, data);
-		return is;
-	}
-	int data = 0;
+    virtual istream& read(serialize& ms, istream& is) override
+    {
+        ms.read(is, data);
+        return is;
+    }
+    int data = 0;
 };
 ```
 
@@ -362,22 +362,22 @@ Later, the protocol data structure changes to add one more data member:
 class DataV2 : public serialize::I
 {
 public:
-	virtual ostream& write(serialize& ms, ostream& os) override
-	{
-		ms.write(os, data);
-		ms.write(os, dataNew);
-		return os;
-	}
+    virtual ostream& write(serialize& ms, ostream& os) override
+    {
+        ms.write(os, data);
+        ms.write(os, dataNew);
+        return os;
+    }
 
-	virtual istream& read(serialize& ms, istream& is) override
-	{
-		ms.read(is, data);
-		ms.read(is, dataNew);
-		return is;
-	}
+    virtual istream& read(serialize& ms, istream& is) override
+    {
+        ms.read(is, data);
+        ms.read(is, dataNew);
+        return is;
+    }
 
-	int data = 0;
-	int dataNew = 0;	// NEW!
+    int data = 0;
+    int dataNew = 0;    // NEW!
 };
 ```
 
@@ -408,26 +408,26 @@ All user defined data types inherit from `serialize::I`:
 class serialize
 {
 public:
-	/// @brief Abstract interface that all serialized user defined classes inherit.
+    /// @brief Abstract interface that all serialized user defined classes inherit.
     class I
     {
     public:
-		/// Inheriting class implements the write function. Write each
-		/// class member to the ostream. Write in the same order as read().
-		/// Each level within the hierarchy must implement. Ensure base 
-		/// write() implementation is called if necessary. 
-		/// @param[in] ms - the message serialize instance
-		/// @param[in] is - the input stream
-		/// @return The input stream
+        /// Inheriting class implements the write function. Write each
+        /// class member to the ostream. Write in the same order as read().
+        /// Each level within the hierarchy must implement. Ensure base 
+        /// write() implementation is called if necessary. 
+        /// @param[in] ms - the message serialize instance
+        /// @param[in] is - the input stream
+        /// @return The input stream
         virtual std::ostream& write(serialize& ms, std::ostream& os) = 0;
 
-		/// Inheriting class implements the read function. Read each
-		/// class member to the ostream. Read in the same order as write().
-		/// Each level within the hierarchy must implement. Ensure base 
-		/// read() implementation is called if necessary. 
+        /// Inheriting class implements the read function. Read each
+        /// class member to the ostream. Read in the same order as write().
+        /// Each level within the hierarchy must implement. Ensure base 
+        /// read() implementation is called if necessary. 
         /// @param[in] ms - the message serialize instance
-		/// @param[in] is - the input stream
-		/// @return The input stream
+        /// @param[in] is - the input stream
+        /// @return The input stream
         virtual std::istream& read(serialize& ms, std::istream& is) = 0;
     };
 ```
@@ -467,16 +467,16 @@ Each data types is prepended with an 8-bit type:
 ```cpp
 enum class Type 
 {
-	UNKNOWN = 0,
-	LITERAL = 1,
-	STRING = 8,
-	WSTRING = 9,
-	VECTOR = 20,
-	MAP = 21,
-	LIST = 22,
-	SET = 23,
-	ENDIAN = 30,
-	USER_DEFINED = 31,
+    UNKNOWN = 0,
+    LITERAL = 1,
+    STRING = 8,
+    WSTRING = 9,
+    VECTOR = 20,
+    MAP = 21,
+    LIST = 22,
+    SET = 23,
+    ENDIAN = 30,
+    USER_DEFINED = 31,
 };
 ```
 
@@ -488,8 +488,8 @@ For instance, a `short` is encoded as an 8-bit `Type` followed by 16-bit `short`
 
 ```cpp
 struct short_data {
-   Type type = LITERAL;	// 8-bits
-   short s;				// 16-bits
+   Type type = LITERAL;     // 8-bits
+   short s;                 // 16-bits
 };
 ```
 
@@ -497,8 +497,8 @@ Similarly, a `long` encoding is shown below.
 
 ```cpp
 struct long_data {
-   Type type = LITERAL;	// 8-bits
-   long l;				// 32-bits
+   Type type = LITERAL;     // 8-bits
+   long l;                  // 32-bits
 };
 ```
 
@@ -508,9 +508,9 @@ All other numeric primitive data types are encoded similarly (e.g. float, double
 
 ```cpp
 struct char_arr_data {
-   Type type = STRING; 		// 8-bits
-   unsigned short size; 	// 16-bits, size is strlen() + 1 
-   char str[length];		// size x 8-bits
+   Type type = STRING;      // 8-bits
+   unsigned short size;     // 16-bits, size is strlen() + 1 
+   char str[length];        // size x 8-bits
 };
 ```
 
@@ -521,45 +521,45 @@ Do not use arrays of numeric values (e.g. `float[]`). Instead, use STL container
 `xstring` encoding:
 ```cpp
 struct string_data {
-   Type type = STRING; 		// 8-bits
-   unsigned short size; 	// 16-bits, size is std::string::size()  
-   char str[size];			// size x 8-bits
+   Type type = STRING;      // 8-bits
+   unsigned short size;     // 16-bits, size is std::string::size()  
+   char str[size];          // size x 8-bits
 };
 ```
 
 `xwstring` encoding:
 ```cpp
 struct wstring_data {
-   Type type = WSTRING; 	// 8-bits
-   unsigned short size; 	// 16-bits, size is std::wstring::size()  
-   wchar_t str[size];		// size x 16-bits
+   Type type = WSTRING;     // 8-bits
+   unsigned short size;     // 16-bits, size is std::wstring::size()  
+   wchar_t str[size];       // size x 16-bits
 };
 ```
 
 `std::list<T>` encoding:
 ```cpp
 struct list_data {
-   Type type = LIST; 		// 8-bits
-   unsigned short size; 	// 16-bits, size is std::list::size()
-   T data[size];			// size x sizeof(T) x 8-bits 
+   Type type = LIST;        // 8-bits
+   unsigned short size;     // 16-bits, size is std::list::size()
+   T data[size];            // size x sizeof(T) x 8-bits 
 };
 ```
 
 `std::list<T&>` encoding:
 ```cpp
 struct list_ref_data {
-   Type type = LIST; 		// 8-bits
-   unsigned short size;		// 16-bits, size is std::list::size()
-   T data[size];			// size x sizeof(T) bits x 8-bits
+   Type type = LIST;        // 8-bits
+   unsigned short size;     // 16-bits, size is std::list::size()
+   T data[size];            // size x sizeof(T) bits x 8-bits
 };
 ```
 
 `std::list<T*>` encoding:
 ```cpp
 struct list_ptr_data {
-   Type type = LIST; 		// 8-bits
-   unsigned short size; 	// 16-bits, size is std::list::size()
-   T data[size];			// size x sizeof(T*) x 8-bits
+   Type type = LIST;        // 8-bits
+   unsigned short size;     // 16-bits, size is std::list::size()
+   T data[size];            // size x sizeof(T*) x 8-bits
 };
 ```
 
@@ -571,9 +571,9 @@ Any user defined class that inherits from `serialize::I`. The size of a user def
 
 ```cpp
 struct user_defined_data {
-   Type type = USER_DEFINED;	// 8-bits
-   unsigned short size; 		// 16-bits, total size of message object octets
-   char data[size];				// size is the number of message object octets serialized
+   Type type = USER_DEFINED;    // 8-bits
+   unsigned short size;         // 16-bits, total size of message object octets
+   char data[size];             // size is the number of message object octets serialized
 };
 ```
 
