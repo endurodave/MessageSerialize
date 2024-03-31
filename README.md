@@ -138,6 +138,10 @@ auto size = ss.tellp();
 char* binary_buf = static_cast<char*>(malloc(size));
 ss.rdbuf()->sgetn(binary_buf, size);
 
+// Alternatively, don't copy and just send data directly from stringstream 
+//extern void SendMsg(const void* data, uint32_t dataSize);
+//SendMsg(ss.str().c_str(), ss.tellp());
+
 // TODO: Send binary_buf to somewhere
 // TODO: Receive binary_buf from somewhere
 
