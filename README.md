@@ -1,25 +1,12 @@
+![License MIT](https://img.shields.io/github/license/BehaviorTree/BehaviorTree.CPP?color=blue)
+[![conan Ubuntu](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_ubuntu.yml/badge.svg)](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_ubuntu.yml)
+[![conan Ubuntu](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_clang.yml/badge.svg)](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_clang.yml)
+[![conan Windows](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_windows.yml/badge.svg)](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_windows.yml)
+
 # Message Serialize
 A simple serialize class to binary serialize and deserialize C++ objects.
 
-# Table of Contents
-
-- [Message Serialize](#message-serialize)
-- [Table of Contents](#table-of-contents)
-- [Introduction](#introduction)
-  - [Purpose](#purpose)
-- [Example Usage](#example-usage)
-- [Error Handling](#error-handling)
-- [Protocol Evolution](#protocol-evolution)
-- [Endianness](#endianness)
-- [Transport Protocol](#transport-protocol)
-  - [Implementation](#implementation)
-  - [Encoding](#encoding)
-  - [Primitive Data Type Encoding](#primitive-data-type-encoding)
-  - [STL Container Encoding](#stl-container-encoding)
-  - [User Defined Encoding](#user-defined-encoding)
-
-
-# Introduction
+## Introduction
 
 The `serialize` class can be used to serialize and deserialize structured data into a binary format suitable for communication protocols, data storage, and inter-process communication (IPC). The STL Input/Output Stream Library is used to hold the encoded octet streams in readiness for transmission or parsing. A single header file `serialize.h` implements the serialize functionality. Any C++14 or higher compiler is supported.
 
@@ -51,7 +38,7 @@ Numerous libraries are available for encoding transport payloads. The `serialize
 
 1. **Robustness:** Automatic endianness handling and parser resilience to message changes over time. 
 
-# Example Usage
+## Example Usage
 
 C++ objects inherit from `serialize::I` to support serialize and deserialize. Methods for serialization (`write`) and deserialization (`read`) are implemented to write/read each object member. `Date` shows a simple example.
 
@@ -313,7 +300,7 @@ public:
 
 See `main.cpp` for more examples. 
 
-# Error Handling 
+## Error Handling 
 Errors and parser progress are monitored by registering a callback function pointer.  
 
 ```cpp
@@ -351,7 +338,7 @@ int main(void)
 ```
 Check for errors with `getLastError()` to get the last parse error code.
 
-# Protocol Evolution
+## Protocol Evolution
 
 The `serialize` class parsing handles deserializing objects even if the number of object data fields don’t match the ones known at compile time due to protocol changes. 
 
@@ -412,11 +399,11 @@ For message protocol resiliency to message changes to work, certain code change 
 * Do not change the data field serialize/deserialize order within `read()` and `write()`.
 * Introduce new data fields to the end of a message object.
 
-# Endianness
+## Endianness
 
 The C++ built-in data types are sent big-endian. Multibyte built-in data types are encoded in multiple octets. Each octet is 8-bits. All built-in multibyte data types are byte swapped for endianness by the sender or receiver as necessary based upon the detected CPU endianness. The serialize class automatically performs the byte swapping when marshalling the octet stream. No alignment bytes are added to the octet stream regardless of the built-in data type size. 
 
-# Transport Protocol
+## Transport Protocol
 
 The `serialize` binary output stream is typically used for a protocol payload. See the link below for an a compact, C language simple socket-like transport protocol with easy porting to any system.
 
@@ -482,7 +469,7 @@ std::istream& read(std::istream& is, std::map<K, V, P>& container) { ... }
 // ...
 ```
 
-## Encoding
+### Encoding
 
 Each data types is prepended with an 8-bit type:
 
@@ -502,7 +489,7 @@ enum class Type
 };
 ```
 
-## Primitive Data Type Encoding
+### Primitive Data Type Encoding
 
 The `struct` definitions below are used to conveying the serialized data memory layout for primitive data types. The structures themselves do not exist within the source code. 
 
@@ -538,7 +525,7 @@ struct char_arr_data {
 
 Do not use arrays of numeric values (e.g. `float[]`). Instead, use STL container classes (e.g. `std::list<float>`).
 
-## STL Container Encoding
+### STL Container Encoding
 
 `xstring` encoding:
 ```cpp
@@ -587,7 +574,7 @@ struct list_ptr_data {
 
 The `std::map`, `std::set`, `std::vector` all follow a similar binary encoding mechanism to `std::list`. 
 
-## User Defined Encoding
+### User Defined Encoding
 
 Any user defined class that inherits from `serialize::I`. The size of a user defined type depends on the number of octets required to serialize the object (not `sizeof(T)`). The size is the total octet count of all data fields contained within the user defined object instance. 
 
