@@ -166,6 +166,10 @@ public:
         ms.write(os, dataSetPtr);
         ms.write(os, dataSetValue);
         ms.write(os, dataSetInt);
+
+        // static_assert; pointers not allowed
+        //ms.write(os, pdate);
+        //ms.write(os, pint);
         return os;
     }
 
@@ -200,6 +204,10 @@ public:
         ms.read(is, dataSetPtr);
         ms.read(is, dataSetValue);
         ms.read(is, dataSetInt);
+
+        // static_assert; pointers not allowed
+        //ms.read(is, pdate);
+        //ms.read(is, pint);
         return is;
     }
 
@@ -232,6 +240,10 @@ public:
     set<Date*> dataSetPtr;
     set<Date> dataSetValue;
     set<int> dataSetInt;
+
+    // Pointer to data not allowed; static_assert triggered
+    Date* pdate = nullptr;
+    int* pint = nullptr;
 };
 
 // DataV1 is a version 1 data structure

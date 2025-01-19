@@ -483,8 +483,12 @@ public:
     template<typename T>
     std::istream& read(std::istream& is, T &t_, bool readPrependedType = true)
     {   
-        static_assert(!(std::is_pointer<T>::value && std::is_arithmetic<typename std::remove_pointer<T>::type>::value),
-            "T cannot be a pointer to a built-in data type");
+        static_assert(!is_unsupported_container<T>::value, "Unsupported C++ container type");
+
+        static_assert(!(std::is_pointer<T>::value &&
+            (std::is_arithmetic<typename std::remove_pointer<T>::type>::value ||
+                std::is_class<typename std::remove_pointer<T>::type>::value)),
+            "T cannot be a pointer to a built-in or custom data type");
 
         if (check_stop_parse(is))
             return is;
@@ -534,8 +538,10 @@ public:
     {
         static_assert(!is_unsupported_container<T>::value, "Unsupported C++ container type");
 
-        static_assert(!(std::is_pointer<T>::value && std::is_arithmetic<typename std::remove_pointer<T>::type>::value),
-            "T cannot be a pointer to a built-in data type");
+        static_assert(!(std::is_pointer<T>::value &&
+            (std::is_arithmetic<typename std::remove_pointer<T>::type>::value ||
+                std::is_class<typename std::remove_pointer<T>::type>::value)),
+            "T cannot be a pointer to a built-in or custom data type");
 
         // Is T type a built-in data type (e.g. float, int, ...)?
         if (std::is_class<T>::value == false)
