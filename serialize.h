@@ -1317,4 +1317,28 @@ private:
     }
 };
 
+template<typename... Ts>
+void make_serialized(serialize& ser, std::ostream& os)
+{
+}
+
+template<typename Arg1, typename... Args>
+void make_serialized(serialize& ser, std::ostream& os, Arg1 arg1, Args... args)
+{
+    ser.write(os, arg1);
+    make_serialized(ser, os, args...);
+}
+
+template<typename... Ts>
+auto make_unserialized(serialize& ser, std::istream& is)
+{
+}
+
+template<typename Arg1, typename... Args>
+void make_unserialized(serialize& ser, std::istream& is, Arg1& arg1, Args&... args)
+{
+    ser.read(is, arg1);
+    make_unserialized(ser, is, args...);
+}
+
 #endif // _SERIALIZE_H
