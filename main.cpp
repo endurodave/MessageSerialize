@@ -6,6 +6,7 @@
 #include <sstream>
 #include <fstream>
 #include <iostream>
+#include <cassert>
 
 using namespace std;
 
@@ -445,6 +446,14 @@ int main(void)
         SerializeToFile(outData);
         AllData allData;
         DeserializeFromFile(allData);
+
+        // Spot check a few values
+        assert(allData.color == Color::BLUE);
+        assert(allData.dataListInt.size() == 2);
+        assert(allData.dataMapInt.size() == 2);
+        assert(allData.valueInt == 4);
+        assert(allData.valueInt32 == 32);
+        assert(allData.valueInt64 == 64);
     }
 
     // Stringstream example
@@ -453,6 +462,14 @@ int main(void)
         SerializeToStringstream(ss, outData);
         AllData allData;
         DeserializeFromStringstream(ss, allData);
+
+        // Spot check a few values
+        assert(allData.color == Color::BLUE);
+        assert(allData.dataListInt.size() == 2);
+        assert(allData.dataMapInt.size() == 2);
+        assert(allData.valueInt == 4);
+        assert(allData.valueInt32 == 32);
+        assert(allData.valueInt64 == 64);
     }
 
     // Test serialize DataV1 and deserialize with DataV2 example

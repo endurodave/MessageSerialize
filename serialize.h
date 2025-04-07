@@ -543,6 +543,37 @@ public:
                 std::is_class<typename std::remove_pointer<T>::type>::value)),
             "T cannot be a pointer to a built-in or custom data type");
 
+// If C++17 or higher
+#if defined(_MSVC_LANG) && _MSVC_LANG >= 201703L || __cplusplus >= 201703L 
+        // Check if T is a user-defined class
+        if constexpr (std::is_class<T>::value)
+        {
+            // Ensure that the class T inherits from serialize::I
+            static_assert(std::is_base_of<serialize::I, T>::value, "T must inherit from serialize::I");
+
+            // Proceed with serialization for user-defined type
+            return write(os, (serialize::I*)&t_);
+        }
+        else
+        {
+            // If T is not a class, handle built-in data types
+            if (std::is_pointer<T>::value == false)
+            {
+                if (prependType)
+                {
+                    write_type(os, Type::LITERAL);
+                }
+                return write_internal(os, (const char*)&t_, sizeof(t_));
+            }
+            else
+            {
+                // Can't write pointers to built-in types
+                raiseError(ParsingError::INVALID_INPUT, __LINE__, __FILE__);
+                os.setstate(std::ios::failbit);
+                return os;
+            }
+        }
+#else
         // Is T type a built-in data type (e.g. float, int, ...)?
         if (std::is_class<T>::value == false)
         {    
@@ -568,6 +599,7 @@ public:
         {     
             return write(os, (serialize::I*)&t_);
         }
+#endif
     }
 
      /// Write a vector container to a stream. The items in vector are stored
