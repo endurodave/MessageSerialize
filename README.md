@@ -8,35 +8,16 @@ A simple serialize class to binary serialize and deserialize C++ objects.
 
 ## Introduction
 
-The `serialize` class can be used to serialize and deserialize structured data into a binary format suitable for communication protocols, data storage, and inter-process communication (IPC). The STL Input/Output Stream Library is used to hold the encoded octet streams in readiness for transmission or parsing. A single header file `serialize.h` implements the serialize functionality. Any C++14 or higher compiler is supported.
+`MessageSerialize` is a lightweight, header-only C++14 library for binary serialization. It provides a simple framework to serialize and deserialize C++ objects and STL containers to/from binary streams, suitable for communication protocols, data storage, or IPC.
 
-1. **Purpose:** The serialize class is designed to provide a framework for serializing and deserializing C++ objects into binary format, enabling data interchange between different systems or storage mediums.
-
-1. **Interface:** The class provides an abstract interface `serialize::I` that all serialized user-defined classes must implement. This interface consists of `write` and `read` functions, responsible for writing class members to an output stream and reading them from an input stream, respectively.
-
-1. **Supported Data Types:** The serialize class supports various C++ data types for serialization, including literals, strings (`std::string` and `std::wstring`), vectors, maps, lists, sets, and character arrays (`char[]`).
-
-1. **Endianness Handling:** It provides functions to determine the endianness of the system and read/write endianness information from/to streams.
-
-1. **Error Handling:** The class handles various parsing errors, such as type mismatch, stream errors, string length exceeding limits, and invalid input, ensuring robustness during serialization and deserialization.
-
-1. **Protocol Evolution:** It supports parsing objects with additional or missing data fields, allowing flexibility in the data interchange protocol. Extra data received after parsing an object is discarded, and missing data fields are ignored, facilitating protocol evolution without breaking compatibility.
-
-1. **Serialization and Deserialization Functions:** The class provides specialized read and write functions for different data types, including user-defined types, strings, vectors (including `std::vector<bool>`), and character arrays.
-
-## Purpose 
-
-Numerous libraries are available for encoding transport payloads. The `serialize` class has a few advantages: 
-
-1. **Simplicity:** A single header file with less than 1000 source lines of code.
-
-1. **Ease of Use:** Inherit from `serialize::I` and override `write()` and `read()`; that's it. 
-
-1. **Flexibility:** Serialize built-in or user defined data types, and STL data containers (e.g. `std::list`, `std::string`).
-
-1. **Efficiency:** Binary encoding efficiently serializes/deserializes messages using STL streams.
-
-1. **Robustness:** Automatic endianness handling and parser resilience to message changes over time. 
+### Key Features
+* **Simple**: Single header-only implementation, < 1000 LOC.
+* **Easy to Use**: Inherit from `serialize::I` and override `read()` and `write()`.
+* **Broad Support**: Primitives, `std::string`, `std::wstring`, `char[]`, and STL containers (`vector`, `map`, `list`, `set`).
+* **Protocol Resilience**: Forward/backward compatibility automatically handles extra or missing fields.
+* **Robust**: Automatic endianness swapping, deep-copy pointer container support, and error reporting.
+* **Efficient**: Minimal metadata overhead using standard STL streams.
+* **Tested**: Extensive unit testing for all supported types and error conditions.
 
 ## Example Usage
 
@@ -126,6 +107,9 @@ public:
 The code snippet below demonstrates creating, transmitting, and receiving a binary-encoded `AlarmLog` message. At runtime, serialize and deserialize an `AlarmLog` object to a `std::stringstream`. Check stream `good()` to ensure parsing success before using object data. The data bytes within the stream can be sent as a communication protocol payload, for instance.
 
 ```cpp
+// Create a serialize instance
+static serialize ms;
+
 // Create an AlarmLog message
 AlarmLog writeLog;
 writeLog.date.day = 31;
@@ -246,7 +230,7 @@ public:
         ms.read(is, valueFloat);
         ms.read(is, valueDouble);
         ms.read(is, color);
-        ms.read(is, cstr);
+        ms.read(is, cstr, sizeof(cstr));
         ms.read(is, str);
         ms.read(is, wstr);
         ms.read(is, dataVectorBool);
@@ -304,7 +288,7 @@ See `main.cpp` for more examples.
 Errors and parser progress are monitored by registering a callback function pointer.  
 
 ```cpp
-#include "serialize.h"
+#include "msg_serialize.h"
 #include <sstream>
 #include <fstream>
 #include <iostream>
@@ -337,6 +321,13 @@ int main(void)
 }
 ```
 Check for errors with `getLastError()` to get the last parse error code.
+
+The parser enforces default limits to prevent excessive memory allocation:
+* `MAX_STRING_SIZE`: 256 characters.
+* `MAX_CONTAINER_SIZE`: 200 elements.
+
+Exceeding these limits will trigger `STRING_TOO_LONG` or `CONTAINER_TOO_MANY` errors respectively.
+
 
 ## Protocol Evolution
 
@@ -401,13 +392,55 @@ For message protocol resiliency to message changes to work, certain code change 
 
 ## Endianness
 
-The C++ built-in data types are sent big-endian. Multibyte built-in data types are encoded in multiple octets. Each octet is 8-bits. All built-in multibyte data types are byte swapped for endianness by the sender or receiver as necessary based upon the detected CPU endianness. The serialize class automatically performs the byte swapping when marshalling the octet stream. No alignment bytes are added to the octet stream regardless of the built-in data type size. 
+The wire format is little-endian. Multibyte built-in data types are encoded in multiple octets. Each octet is 8-bits. On big-endian hosts the bytes are automatically swapped before writing and after reading so that the on-wire representation is always little-endian. The serialize class performs this byte swapping transparently. No alignment bytes are added to the octet stream regardless of the built-in data type size.
+
+## Seekable Stream Requirement
+
+Serializing user-defined objects (classes that inherit from `serialize::I`) requires a **seekable** output stream. After writing the object body, the library seeks back to backfill the object's size field. Suitable stream types include `std::stringstream` and `std::fstream` (opened in binary mode). Non-seekable streams such as `std::cout` or a raw socket buffer will trigger a `NON_SEEKABLE_STREAM` error and set the stream's `failbit`.
+
+```cpp
+// OK — stringstream is seekable
+std::stringstream ss(std::ios::in | std::ios::out | std::ios::binary);
+ms.write(ss, myObject);
+
+// OK — fstream is seekable
+std::ofstream file("data.bin", std::ios::binary);
+ms.write(file, myObject);
+```
+
+Always open streams in **binary mode** (`std::ios::binary`). Text-mode streams apply newline translation on some platforms, which corrupts binary data.
+
+## Comparison
+
+The table below compares `MessageSerialize` with other popular C++ serialization libraries. 
+
+| Feature | **MessageSerialize** | **Bitsery** | **Msgpack** | **Cereal** |
+| :--- | :--- | :--- | :--- | :--- |
+| **Design Goal** | Simplicity & Robustness | Performance & Size | Cross-language | Ease of Use |
+| **Complexity** | Very Low (1 header) | Low (Header-only) | Moderate | Moderate |
+| **Metadata Overhead** | Low (8-bit tags + size) | **Zero** (by default) | Low (Type tags) | Moderate |
+| **Memory Allocation** | Optional (for pointers) | **Minimal/None** | Often required | Required (Tracking) |
+| **Protocol Evolution** | **Automatic (Size-based)**| Manual (Extensions) | Natural (Schemaless) | Explicit (Versions) |
+| **Embedded Use** | High (Seekable req.) | Excellent | Good (mpack) | Fair |
+| **Fixed Allocators** | Via STL Allocators | Yes | Varies by impl | Limited |
+
+### Key Differences
+
+1. **Simplicity vs. Performance**: While `Bitsery` is faster and produces smaller payloads by omitting all metadata, `MessageSerialize` includes 1-byte type tags and object sizes. This metadata allows `MessageSerialize` to automatically handle protocol changes (like adding fields) without any versioning macros or manual extension management.
+
+1. **Protocol Evolution**: `MessageSerialize` uses a unique size-backfilling mechanism. When a reader encounters a user-defined object, it knows the total byte-size. If the reader's class has fewer fields than the data (newer version), it simply skips the remaining bytes. If it has more fields (older version), it stops when the data runs out. This is more robust than `Cereal`'s strict versioning and simpler than `Bitsery`'s extensions.
+
+1. **Embedded Constraints**: `MessageSerialize` is highly suitable for embedded systems but requires a **seekable stream** (like `stringstream` or a file) for user-defined objects because it must backfill the object size after serialization. Libraries like `Bitsery` can stream directly to a non-seekable socket if configured correctly.
+
+1. **Memory Management**: Like `Cereal`, `MessageSerialize` leverages STL containers. For strict no-heap environments, `MessageSerialize` can be used with STL containers and fixed-block allocators (e.g., `std::vector<int, MyFixedAlloc>`), as the library is templated to support any standard-compliant allocator. See [stl_allocator](https://github.com/endurodave/stl_allocator) for a compatible fixed-block allocator implementation.
 
 ## Transport Protocol
 
-The `serialize` binary output stream is typically used for a protocol payload. See the link below for an a compact, C language simple socket-like transport protocol with easy porting to any system.
+The `serialize` binary output stream is typically used for a protocol payload. See the links below for transport protocol examples. 
 
-[Simple Socket Protocol](https://github.com/endurodave/SimpleSocketProtocol)
+[DelegateMQ](https://github.com/DelegateMQ) - a C++ messaging library for messaging between threads and across processors.
+
+[Simple Socket Protocol](https://github.com/endurodave/SimpleSocketProtocol) - a compact, C language simple socket-like transport protocol.
 
 ## Implementation
 
@@ -445,27 +478,35 @@ Numerous `serialize` overloads handle `write`/`read` of different data types:
 
 ```cpp
 // Write APIs
-std::ostream& write(std::ostream& os, std::string& s) { ... }
+template<typename T>
+std::ostream& write(std::ostream& os, T& t_, bool prependType = true) { ... }
 
-std::ostream& write (std::ostream& os, const std::wstring& s) { ... }
+std::ostream& write(std::ostream& os, const std::string& s) { ... }
 
-template <class T>
-std::ostream& write(std::ostream& os, std::vector<T>& container) { ... }
+std::ostream& write(std::ostream& os, const std::wstring& s) { ... }
 
-template <class K, class V, class P>
-std::ostream& write(std::ostream& os, std::map<K, V, P>& container) { ... }
+template <class T, class Alloc>
+std::ostream& write(std::ostream& os, std::vector<T, Alloc>& container) { ... }
+
+template <class K, class V, class P, class Alloc>
+std::ostream& write(std::ostream& os, std::map<K, V, P, Alloc>& container) { ... }
 // ...
 
 // Read APIs
-std::istream& read (std::istream& is, std::string& s) { ... }
+template<typename T>
+std::istream& read(std::istream& is, T& t_, bool readPrependedType = true) { ... }
 
-std::istream& read (std::istream& is, std::wstring& s) { ... }
+std::istream& read(std::istream& is, std::string& s) { ... }
 
-template <class T>
-std::istream& read(std::istream& is, std::vector<T>& container) { ... }
+std::istream& read(std::istream& is, std::wstring& s) { ... }
 
-template <class K, class V, class P>
-std::istream& read(std::istream& is, std::map<K, V, P>& container) { ... }
+std::istream& read(std::istream& is, char* str, size_t maxLen) { ... }
+
+template <class T, class Alloc>
+std::istream& read(std::istream& is, std::vector<T, Alloc>& container) { ... }
+
+template <class K, class V, class P, class Alloc>
+std::istream& read(std::istream& is, std::map<K, V, P, Alloc>& container) { ... }
 // ...
 ```
 

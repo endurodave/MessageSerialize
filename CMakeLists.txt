@@ -2,7 +2,7 @@
 #
 # cmake -B build .
 
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.10)
 project(MessageSerializer)
 
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
