@@ -899,7 +899,7 @@ static void ContainerStringTests()
     }
     // Strings and containers with a custom allocator
     {
-        using AString = std::basic_string<char, std::char_traits<char>, TestAllocator<char>>;
+        using AString = std::basic_string<char, std::string::traits_type, TestAllocator<char>>;
         std::list<AString, TestAllocator<AString>> src{ "p", "q" };
         std::list<AString, TestAllocator<AString>> dst;
         std::map<int32_t, AString, std::less<int32_t>, TestAllocator<std::pair<const int32_t, AString>>> msrc{ { 1, "m" } };
