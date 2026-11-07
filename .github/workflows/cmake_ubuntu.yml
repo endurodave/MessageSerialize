@@ -11,13 +11,24 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest  # Use Ubuntu environment for the build
+    name: build (${{ matrix.memory }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # heap: global heap (default). allocator: fixed-block allocator (allocator/)
+        memory: [heap, allocator]
+        include:
+          - memory: heap
+            allocator: OFF
+          - memory: allocator
+            allocator: ON
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4  # Checkout the repository code
 
     - name: Configure CMake
-      run: cmake -S . -B build # Configure CMake to generate build files in 'build' directory
+      run: cmake -S . -B build -DMSG_SERIALIZE_ALLOCATOR=${{ matrix.allocator }} # Configure CMake to generate build files in 'build' directory
 
     - name: Build
       run: cmake --build build  # Build the project using CMake

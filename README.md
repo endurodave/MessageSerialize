@@ -11,13 +11,15 @@ A simple serialize class to binary serialize and deserialize C++ objects.
 `MessageSerialize` is a lightweight, header-only C++14 library for binary serialization. It provides a simple framework to serialize and deserialize C++ objects and STL containers to/from binary streams, suitable for communication protocols, data storage, or IPC.
 
 ### Key Features
-* **Simple**: Single header-only implementation, < 1000 LOC.
+* **Simple**: Single header-only implementation, no dependencies beyond the C++ standard library.
 * **Easy to Use**: Inherit from `serialize::I` and override `read()` and `write()`.
-* **Broad Support**: Primitives, `std::string`, `std::wstring`, `char[]`, and STL containers (`vector`, `map`, `list`, `set`).
+* **Broad Support**: Primitives, `std::string`, `std::wstring`, `char[]`, and STL containers (`vector`, `array`, `map`, `list`, `set`), including nested containers (e.g. `std::vector<std::vector<int>>`, `std::map<std::string, std::list<int>>`) and containers of strings.
+* **Custom Allocators**: Strings and containers with any standard-compliant allocator serialize the same as the `std::` defaults.
+* **Bounded Input**: Configurable string, container and nesting limits, checked on write and on read, so a malformed or hostile message can't make the receiver allocate without bound or recurse too deep.
 * **Protocol Resilience**: Forward/backward compatibility automatically handles extra or missing fields.
 * **Robust**: Automatic endianness swapping, deep-copy pointer container support, and error reporting.
 * **Efficient**: Minimal metadata overhead using standard STL streams.
-* **Tested**: Extensive unit testing for all supported types and error conditions.
+* **Tested**: Extensive unit tests (`SerializeTests.cpp`) for all supported types, limits and error conditions.
 
 ## Example Usage
 
@@ -284,6 +286,77 @@ public:
 
 See `main.cpp` for more examples. 
 
+## Building and Testing
+
+```
+cmake -B build .
+cmake --build build
+./build/Serializer
+```
+
+`Serializer` runs the examples in `main.cpp`, then the unit tests in `SerializeTests.cpp`, and ends with `All serialize tests passed (global heap).` On a failure it prints `TEST FAILED` with the file and line and exits with status 1. The tests run in every build type, Release included.
+
+| CMake option | Default | Effect |
+|---|---|---|
+| `MSG_SERIALIZE_ALLOCATOR` | `OFF` | `ON`: `dmq::x*` types use the fixed-block allocator (see [Fixed-Block Allocator](#fixed-block-allocator)) |
+| `MSG_SERIALIZE_ALLOCATOR_SAFEGUARDS` | `OFF` | With the allocator: guard words and checks on every block, to catch overruns and double frees |
+
+The GitHub workflows (Windows, Ubuntu GCC, Clang) build and run both the global heap and the fixed-block allocator variants.
+
+Only `msg_serialize.h` is needed to use the library; `allocator/` is optional.
+
+## Fixed-Block Allocator
+
+The optional `allocator/` directory is a fixed-block memory allocator, for embedded systems where the global heap is unavailable, too slow or fragments. It comes from [DelegateMQ](https://github.com/DelegateMQ/DelegateMQ) and keeps its names (namespace `dmq`, `DMQ_*` macros), but needs nothing else from it. See [allocator/README.md](allocator/README.md).
+
+Declare message fields with the `dmq::x*` types from `allocator/xtypes.h`. The `MSG_SERIALIZE_ALLOCATOR` build option picks their memory, with no code changes:
+
+| Type | `MSG_SERIALIZE_ALLOCATOR=OFF` | `MSG_SERIALIZE_ALLOCATOR=ON` |
+|---|---|---|
+| `dmq::xstring` | `std::string` | `std::basic_string` on fixed-block pools |
+| `dmq::xlist<T>`, `dmq::xmap<K, V>`, `dmq::xset<T>` | `std::list`, `std::map`, `std::set` | the same containers on fixed-block pools |
+| `dmq::xstringstream`, `dmq::xostringstream` | `std::stringstream`, `std::ostringstream` | stream buffers on fixed-block pools |
+| `XALLOCATOR` (in a class) | nothing | class `operator new`/`delete` from the pools |
+
+```cpp
+#include "msg_serialize.h"
+#include "xtypes.h"
+
+class Status : public serialize::I
+{
+    XALLOCATOR                          // 'new Status' uses the pools when enabled
+public:
+    dmq::xstring name;
+    dmq::xlist<int32_t> codes;
+
+    std::ostream& write(serialize& ms, std::ostream& os) override
+    {
+        ms.write(os, name);
+        return ms.write(os, codes);
+    }
+    std::istream& read(serialize& ms, std::istream& is) override
+    {
+        ms.read(is, name);
+        return ms.read(is, codes);
+    }
+};
+```
+
+The allocator doesn't change the wire format: a `dmq::xlist<dmq::xstring>` written on one node reads into a `std::list<std::string>` on another.
+
+### Choosing Containers on Embedded Targets
+
+What a message's fields allocate matters more on an MCU than how they're serialized. With the allocator, memory comes from fixed-block pools, one pool per power-of-two block size, and blocks are kept for reuse rather than returned to the heap.
+
+| Field type | Allocation | Embedded use |
+|---|---|---|
+| `std::array<T, N>`, `char[N]` | None | **Best.** Fixed size, no heap and no pool. |
+| `dmq::xlist`, `dmq::xmap`, `dmq::xset` | One same-size node per element, from one fixed-block pool | **Good.** Freed nodes are reused exactly. |
+| `dmq::xstring` | One block sized to the string, from a fixed-block pool | **Good**, bounded by `MSG_SERIALIZE_MAX_STRING_SIZE`. |
+| `std::vector` | One contiguous block, reallocated larger as it grows | **Host-side only.** Each growth step needs a larger block size, so a vector touches several pools and each keeps its blocks. In static-pool mode the largest block is 4096 bytes. |
+
+On the MCU, declare message fields with `std::array`, `dmq::xlist`/`xmap`/`xset` and `dmq::xstring`. On desktop or gateway nodes, `std::vector` is fine, and one end can use `std::vector<T>` while the other uses `std::array<T, N>` for the same field.
+
 ## Error Handling 
 Errors and parser progress are monitored by registering a callback function pointer.  
 
@@ -322,11 +395,43 @@ int main(void)
 ```
 Check for errors with `getLastError()` to get the last parse error code.
 
-The parser enforces default limits to prevent excessive memory allocation:
-* `MAX_STRING_SIZE`: 256 characters.
-* `MAX_CONTAINER_SIZE`: 200 elements.
+A failed read or write also sets the stream's `failbit`, so checking `is.good()` / `os.good()` after a call is enough to detect any error.
 
-Exceeding these limits will trigger `STRING_TOO_LONG` or `CONTAINER_TOO_MANY` errors respectively.
+| Error | Cause |
+|---|---|
+| `TYPE_MISMATCH` | The type tag in the stream doesn't match the type being read |
+| `STREAM_ERROR` | The stream was already bad, or ran out of data mid-value |
+| `STRING_TOO_LONG` | A string exceeds `MSG_SERIALIZE_MAX_STRING_SIZE`, or doesn't fit the `char[]` it is read into |
+| `CONTAINER_TOO_MANY` | A container exceeds `MSG_SERIALIZE_MAX_CONTAINER_SIZE` |
+| `INVALID_INPUT` | Invalid data, e.g. a `std::array<T, N>` receiving a count other than `N` |
+| `NON_SEEKABLE_STREAM` | A user-defined object was written to a stream that can't seek |
+| `END_OF_FILE` | Read past the end of the stream |
+| `NESTING_TOO_DEEP` | `serialize::I` objects nested deeper than `MSG_SERIALIZE_MAX_NESTING` on read |
+
+## Limits
+
+The parser limits are compile-time settings. Define any of them before including `msg_serialize.h`, or on the compiler command line (e.g. `-DMSG_SERIALIZE_MAX_STRING_SIZE=1024`), to override the default. Use the same values on both ends of a link. They apply on write and on read, so a received message can't make the receiver allocate more than this. Exceeding one fails the stream with the error shown.
+
+| Setting | Default | Limits | Error |
+|---|---|---|---|
+| `MSG_SERIALIZE_MAX_STRING_SIZE` | 256 | String length in bytes, not counting a terminator (none is sent); at most 65535 | `STRING_TOO_LONG` |
+| `MSG_SERIALIZE_MAX_CONTAINER_SIZE` | 200 | Elements in a vector, array, list, set or map; at most 65535. Each nested container is checked on its own. A `std::array` larger than this is a compile error | `CONTAINER_TOO_MANY` |
+| `MSG_SERIALIZE_MAX_NESTING` | 8 | Depth of `serialize::I` objects nested inside each other, checked on read | `NESTING_TOO_DEEP` |
+
+## Strings
+
+`std::string`, `char*` and `char[]` share one encoding: a `STRING` tag, a 16-bit length and the characters, with no terminator. A string reads back the same whichever way it was sent, and a `std::string` whose data contains or ends in a zero byte keeps every byte. Reading into a `char[]` adds the terminator, and fails with `STRING_TOO_LONG` if the buffer has no room for it:
+
+```cpp
+char name[16];
+ms.read(is, name, sizeof(name));   // capacity including the terminator
+```
+
+> **Wire change:** earlier versions sent a `char*` with its terminator. A current reader still accepts that. An older reader that reads a current `char*` into a `char[]` gets no terminator, so update both ends together.
+
+## Fixed-Size Arrays
+
+`std::array<T, N>` is supported and needs no heap, which suits embedded targets. It is sent exactly like a `std::vector` (the `VECTOR` tag, a count, the elements), so one end can use `std::vector<T>` and the other `std::array<T, N>` for the same field. Reading into a `std::array` fails with `INVALID_INPUT` unless exactly `N` elements arrive. Reading into a `std::vector` reserves the received count first, so it allocates once.
 
 
 ## Protocol Evolution
@@ -432,7 +537,26 @@ The table below compares `MessageSerialize` with other popular C++ serialization
 
 1. **Embedded Constraints**: `MessageSerialize` is highly suitable for embedded systems but requires a **seekable stream** (like `stringstream` or a file) for user-defined objects because it must backfill the object size after serialization. Libraries like `Bitsery` can stream directly to a non-seekable socket if configured correctly.
 
-1. **Memory Management**: Like `Cereal`, `MessageSerialize` leverages STL containers. For strict no-heap environments, `MessageSerialize` can be used with STL containers and fixed-block allocators (e.g., `std::vector<int, MyFixedAlloc>`), as the library is templated to support any standard-compliant allocator. See [stl_allocator](https://github.com/endurodave/stl_allocator) for a compatible fixed-block allocator implementation.
+1. **Memory Management**: Like `Cereal`, `MessageSerialize` leverages STL containers. For strict no-heap environments, `MessageSerialize` can be used with STL containers and fixed-block allocators (e.g., `std::vector<int, MyFixedAlloc>`), as the library is templated to support any standard-compliant allocator. The optional [Fixed-Block Allocator](#fixed-block-allocator) in `allocator/` provides one, and `std::array` needs no allocation at all.
+
+### Embedded Tradeoffs
+
+Choosing a serializer for an embedded target involves constraints that don't apply on Linux or Windows: limited heap, no or restricted exception support, code-size budgets, and endianness differences between the MCU and any host it talks to.
+
+| Serializer | Embedded suitability | Notes |
+|---|---|---|
+| **MessageSerialize** | Good | No external dependencies, automatic endianness handling, builds without exceptions (errors are reported through the stream state). Bounded input: string, container and nesting limits are checked on read. Types inherit `serialize::I` and implement `read()`/`write()`. Slightly larger wire format due to type tags and size-prefix versioning. |
+| **Bitsery** | Best for tight constraints | Header-only, designed for real-time/embedded use, smallest payloads. Plain structs work with a `serialize()` function, no base class. No type tags on the wire, so a mismatch isn't detected; endianness is configured explicitly rather than handled automatically. |
+| **MessagePack** (msgpack-c) | Linux/Windows | Allocates dynamically (`msgpack::sbuffer`, `std::vector`) and is an external dependency: manageable on a host, a concern on an MCU with a small RTOS heap. Its strength is cross-language messaging. |
+| **Cereal** | Poor | Heavy template machinery and reliance on exceptions and `<memory>` increase code size considerably. Rarely justified on a Cortex-M class target. |
+| **RapidJSON** | Poor | JSON payloads (field names, brackets, quotes) are typically 3–10× larger than an equivalent binary format. Use it when a host needs human-readable output or REST interoperability, not for high-rate data on an MCU. |
+
+**Guidance:**
+
+- **Default embedded choice**: MessageSerialize. It works out of the box with no external dependencies, and handles endianness automatically, which matters when an MCU talks to an x86 host.
+- **Smallest and fastest**: Bitsery, when payload size or throughput matters most and both ends are trusted C++ code built together.
+- **Other languages on the far end**: MessagePack, on host-side nodes.
+- **Host-side only**: Cereal and RapidJSON.
 
 ## Transport Protocol
 
@@ -554,17 +678,17 @@ struct long_data {
 
 All other numeric primitive data types are encoded similarly (e.g. float, double, unsigned long, ...). Primitive numeric data types are automatically byte swapped to handle endianness.
 
-`char[]` string encoding (null terminated):
+`char[]` / `char*` string encoding (same as `std::string`, no terminator):
 
 ```cpp
 struct char_arr_data {
    Type type = STRING;      // 8-bits
-   unsigned short size;     // 16-bits, size is strlen() + 1 
-   char str[length];        // size x 8-bits
+   unsigned short size;     // 16-bits, size is strlen()
+   char str[size];          // size x 8-bits
 };
 ```
 
-Do not use arrays of numeric values (e.g. `float[]`). Instead, use STL container classes (e.g. `std::list<float>`).
+Do not use C arrays of numeric values (e.g. `float[]`). Instead, use `std::array<float, N>` or an STL container (e.g. `std::list<float>`).
 
 ### STL Container Encoding
 
@@ -613,7 +737,7 @@ struct list_ptr_data {
 };
 ```
 
-The `std::map`, `std::set`, `std::vector` all follow a similar binary encoding mechanism to `std::list`. 
+The `std::map`, `std::set`, `std::vector` all follow a similar binary encoding mechanism to `std::list`. `std::array<T, N>` uses the `VECTOR` encoding. A container element that is itself a container or a string uses that type's full encoding, so containers nest to any depth.
 
 ### User Defined Encoding
 

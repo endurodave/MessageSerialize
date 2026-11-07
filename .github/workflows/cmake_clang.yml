@@ -11,13 +11,24 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest  # Use Ubuntu environment for the build
+    name: build (${{ matrix.memory }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # heap: global heap (default). allocator: fixed-block allocator (allocator/)
+        memory: [heap, allocator]
+        include:
+          - memory: heap
+            allocator: OFF
+          - memory: allocator
+            allocator: ON
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4  # Checkout the repository code
 
     - name: Configure CMake with Clang
-      run: cmake -S . -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++  # Configure CMake with Clang as the compiler
+      run: cmake -S . -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DMSG_SERIALIZE_ALLOCATOR=${{ matrix.allocator }}  # Configure CMake with Clang as the compiler
 
     - name: Build
       run: cmake --build build  # Build the project using CMake

@@ -49,13 +49,44 @@
 #include <limits>
 #include <type_traits>
 #include <typeinfo>
-#include <iostream>
+#include <istream>
+#include <ostream>
 #include <memory>
+#include <array>
 #include <vector>
 #include <list>
 #include <map>
 #include <set>
 #include <string>
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+// Parser limits. Define any of these before including this header (or on the
+// compiler command line) to override the default. They apply on write and on
+// read, so a received message can't make the receiver allocate more than this.
+
+/// Max string length in bytes (std::string, std::wstring characters, char*).
+/// At most 65535 (16-bit length field). Exceeding it: STRING_TOO_LONG.
+#ifndef MSG_SERIALIZE_MAX_STRING_SIZE
+#define MSG_SERIALIZE_MAX_STRING_SIZE 256
+#endif
+
+/// Max elements in a vector, list, set, map or std::array. At most 65535.
+/// Exceeding it: CONTAINER_TOO_MANY.
+#ifndef MSG_SERIALIZE_MAX_CONTAINER_SIZE
+#define MSG_SERIALIZE_MAX_CONTAINER_SIZE 200
+#endif
+
+/// Max depth of serialize::I objects nested inside each other. Exceeding it:
+/// NESTING_TOO_DEEP.
+#ifndef MSG_SERIALIZE_MAX_NESTING
+#define MSG_SERIALIZE_MAX_NESTING 8
+#endif
+
+static_assert(MSG_SERIALIZE_MAX_STRING_SIZE <= 65535 && MSG_SERIALIZE_MAX_CONTAINER_SIZE <= 65535,
+    "msg_serialize length fields are 16 bits");
+static_assert(MSG_SERIALIZE_MAX_NESTING >= 1, "MSG_SERIALIZE_MAX_NESTING must be at least 1");
 
 namespace serialize_traits
 {
@@ -129,6 +160,7 @@ namespace serialize_traits
 /// by pointer. C++ containers supported are:
 ///
 ///     vector
+///     array (std::array, uses the VECTOR type so it interoperates with vector)
 ///     list
 ///     map
 ///     set
@@ -162,6 +194,8 @@ public:
     class I
     {
     public:
+        virtual ~I() = default;
+
         /// Inheriting class implements the write function. Write each
         /// class member to the ostream. Write in the same order as read().
         /// Each level within the hierarchy must implement. Ensure base
@@ -204,7 +238,8 @@ public:
         STRING_TOO_LONG,
         CONTAINER_TOO_MANY,
         INVALID_INPUT,
-        END_OF_FILE
+        END_OF_FILE,
+        NESTING_TOO_DEEP        // USER_DEFINED nesting exceeded MAX_PARSE_STACK_DEPTH
     };
 
     serialize() = default;
@@ -268,10 +303,35 @@ public:
 
                 read(is, size, false);
 
+                std::streampos targetStopPos = startPos + std::streampos(size);
+
+                // Bounds check: ensure size does not exceed stream EOF
+                std::streampos dataPos = is.tellg();
+                is.seekg(0, std::ios::end);
+                std::streampos endPosStream = is.tellg();
+                is.seekg(dataPos);
+
+                if (targetStopPos > endPosStream) {
+                    raiseError(ParsingError::INVALID_INPUT, __LINE__, __FILE__);
+                    is.setstate(std::ios::failbit);
+                    return is;
+                }
+
+                // Bounds check: ensure size does not exceed parent object's bounds
+                if (stopParsePosIdx > 0 && targetStopPos > stopParsePosStack[stopParsePosIdx - 1]) {
+                    raiseError(ParsingError::INVALID_INPUT, __LINE__, __FILE__);
+                    is.setstate(std::ios::failbit);
+                    return is;
+                }
+
                 parseStatus(typeid(*t_), size);
 
                 // Save the stop parsing position to prevent parsing overrun
-                push_stop_parse_pos(startPos + std::streampos(size));
+                if (!push_stop_parse_pos(targetStopPos)) {
+                    raiseError(ParsingError::NESTING_TOO_DEEP, __LINE__, __FILE__);
+                    is.setstate(std::ios::failbit);
+                    return is;
+                }
 
                 t_->read(*this, is);
 
@@ -300,7 +360,8 @@ public:
     /// @param[in] is - the input stream
     /// @param[in] s - the string to read
     /// @return The input stream
-    std::istream& read(std::istream& is, std::string& s)
+    template <typename Traits, typename Alloc>
+    std::istream& read(std::istream& is, std::basic_string<char, Traits, Alloc>& s)
     {
         if (check_stop_parse(is))
             return is;
@@ -324,7 +385,8 @@ public:
     /// @param[in] is - the input stream
     /// @param[in] s - the string to read
     /// @return The input stream
-    std::istream& read(std::istream& is, std::wstring& s)
+    template <typename Traits, typename Alloc>
+    std::istream& read(std::istream& is, std::basic_string<wchar_t, Traits, Alloc>& s)
     {
         if (check_stop_parse(is))
             return is;
@@ -364,18 +426,52 @@ public:
         {
             uint16_t size = 0;
             read(is, size, false);
-            if (check_stream(is) && check_slength(is, size))
+            if (!check_stream(is) || !check_pointer(is, str))
+                return is;
+            if (maxLen == 0)
             {
-                if (check_pointer(is, str))
+                raiseError(ParsingError::STRING_TOO_LONG, __LINE__, __FILE__);
+                is.setstate(std::ios::failbit);
+                return is;
+            }
+            // Leave str a valid (empty) C string on every early return below.
+            // An empty std::string is sent with size 0 and no bytes.
+            str[0] = '\0';
+            if (size == 0)
+                return is;
+            if (!check_slength(is, size))
+                return is;
+            if (size > maxLen)
+            {
+                raiseError(ParsingError::STRING_TOO_LONG, __LINE__, __FILE__);
+                is.setstate(std::ios::failbit);
+                return is;
+            }
+            parseStatus(typeid(str), size);
+            read_internal(is, str, size, true);
+
+            // Truncated stream: is.read() stopped early, so str[gcount()..size-1]
+            // is uninitialized. Report the stream error, not STRING_TOO_LONG.
+            if (!check_stream(is))
+            {
+                str[0] = '\0';
+                return is;
+            }
+
+            // Strings go out without a terminator (older versions sent one with
+            // a const char*). Terminate here if the data didn't, failing if
+            // there's no room.
+            if (str[size - 1] != '\0')
+            {
+                if (size < maxLen)
                 {
-                    if (size > maxLen)
-                    {
-                        raiseError(ParsingError::STRING_TOO_LONG, __LINE__, __FILE__);
-                        is.setstate(std::ios::failbit);
-                        return is;
-                    }
-                    parseStatus(typeid(str), size);
-                    read_internal(is, str, size, true);
+                    str[size] = '\0';
+                }
+                else
+                {
+                    str[maxLen - 1] = '\0';
+                    raiseError(ParsingError::STRING_TOO_LONG, __LINE__, __FILE__);
+                    is.setstate(std::ios::failbit);
                 }
             }
         }
@@ -403,6 +499,8 @@ public:
             if (check_stream(is) && check_container_size(is, size))
             {
                 parseStatus(typeid(container), size);
+                // One allocation of the final size instead of regrowing per element.
+                container.reserve(size);
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     bool t;
@@ -443,7 +541,13 @@ public:
                 // Backfill the object size into the stream (requires seekable stream)
                 std::streampos currentPos = os.tellp();
                 os.seekp(elementSizePos);
-                elementSize = static_cast<uint16_t>(currentPos - elementSizePos);
+                auto sizeDiff = currentPos - elementSizePos;
+                if (sizeDiff > UINT16_MAX) {
+                    raiseError(ParsingError::INVALID_INPUT, __LINE__, __FILE__);
+                    os.setstate(std::ios::failbit);
+                    return os;
+                }
+                elementSize = static_cast<uint16_t>(sizeDiff);
                 write(os, elementSize, false);
                 os.seekp(currentPos);
             }
@@ -456,9 +560,14 @@ public:
     /// @param[in] os - the output stream
     /// @param[in] s - the string to write
     /// @return The output stream
-    std::ostream& write(std::ostream& os, const std::string& s)
+    template <typename Traits, typename Alloc>
+    std::ostream& write(std::ostream& os, const std::basic_string<char, Traits, Alloc>& s)
     {
-        assert(s.size() <= (std::numeric_limits<uint16_t>::max)());
+        if (s.size() > MAX_STRING_SIZE) {
+            raiseError(ParsingError::STRING_TOO_LONG, __LINE__, __FILE__);
+            os.setstate(std::ios::failbit);
+            return os;
+        }
         uint16_t size = static_cast<uint16_t>(s.size());
         write_type(os, Type::STRING);
         write(os, size, false);
@@ -473,18 +582,24 @@ public:
     /// @param[in] os - the output stream
     /// @param[in] s - the string to write
     /// @return The output stream
-    std::ostream& write(std::ostream& os, std::string& s)
+    template <typename Traits, typename Alloc>
+    std::ostream& write(std::ostream& os, std::basic_string<char, Traits, Alloc>& s)
     {
-        return write(os, static_cast<const std::string&>(s));
+        return write(os, static_cast<const std::basic_string<char, Traits, Alloc>&>(s));
     }
 
     /// Write a const std::wstring to a stream.
     /// @param[in] os - the output stream
     /// @param[in] s - the string to write
     /// @return The output stream
-    std::ostream& write(std::ostream& os, const std::wstring& s)
+    template <typename Traits, typename Alloc>
+    std::ostream& write(std::ostream& os, const std::basic_string<wchar_t, Traits, Alloc>& s)
     {
-        assert(s.size() <= (std::numeric_limits<uint16_t>::max)());
+        if (s.size() > MAX_STRING_SIZE) {
+            raiseError(ParsingError::STRING_TOO_LONG, __LINE__, __FILE__);
+            os.setstate(std::ios::failbit);
+            return os;
+        }
         uint16_t size = static_cast<uint16_t>(s.size());
         write_type(os, Type::WSTRING);
         write(os, size, false);
@@ -504,9 +619,10 @@ public:
     /// @param[in] os - the output stream
     /// @param[in] s - the string to write
     /// @return The output stream
-    std::ostream& write(std::ostream& os, std::wstring& s)
+    template <typename Traits, typename Alloc>
+    std::ostream& write(std::ostream& os, std::basic_string<wchar_t, Traits, Alloc>& s)
     {
-        return write(os, static_cast<const std::wstring&>(s));
+        return write(os, static_cast<const std::basic_string<wchar_t, Traits, Alloc>&>(s));
     }
 
     /// Write a character string to a stream.
@@ -526,7 +642,18 @@ public:
     {
         if (check_pointer(os, str))
         {
-            uint16_t size = static_cast<uint16_t>(strlen(str)) + 1;
+            // Check before narrowing: a length over 65535 would wrap the 16-bit
+            // size and silently send a truncated string.
+            const size_t len = strlen(str);
+            if (len > MAX_STRING_SIZE)
+            {
+                raiseError(ParsingError::STRING_TOO_LONG, __LINE__, __FILE__);
+                os.setstate(std::ios::failbit);
+                return os;
+            }
+            // No terminator on the wire, the same as std::string: the reader
+            // adds one for a char buffer, and a std::string keeps every byte.
+            uint16_t size = static_cast<uint16_t>(len);
             write_type(os, Type::STRING);
             write(os, size, false);
             if (check_stream(os) && check_slength(os, size))
@@ -545,9 +672,13 @@ public:
     /// @param[in] os - the output stream
     /// @param[in] container - the vector container to write
     /// @return The output stream
-    std::ostream& write(std::ostream& os, std::vector<bool>& container)
+    std::ostream& write(std::ostream& os, const std::vector<bool>& container)
     {
-        assert(container.size() <= (std::numeric_limits<uint16_t>::max)());
+        if (container.size() > MAX_CONTAINER_SIZE) {
+            raiseError(ParsingError::CONTAINER_TOO_MANY, __LINE__, __FILE__);
+            os.setstate(std::ios::failbit);
+            return os;
+        }
         uint16_t size = static_cast<uint16_t>(container.size());
         write_type(os, Type::VECTOR);
         write(os, size, false);
@@ -575,10 +706,58 @@ public:
                 std::is_class<typename std::remove_pointer<T>::type>::value)),
             "T cannot be a pointer to a built-in or custom data type. Use values instead.");
 
+        // Same check as write(): any other class type would be cast to I* below.
+        static_assert(!std::is_class<T>::value || std::is_base_of<serialize::I, T>::value,
+            "T must inherit from serialize::I");
+
         if (check_stop_parse(is))
             return is;
 
+        // If C++17 or higher
+#if defined(_MSVC_LANG) && _MSVC_LANG >= 201703L || __cplusplus >= 201703L
+        // Check if T is a user-defined class
+        if constexpr (std::is_class<T>::value)
+        {
+            // C-style cast required: T may be const-qualified (e.g. const AlarmMsg)
+            // when called from a const context, and neither static_cast nor
+            // reinterpret_cast can strip const. A C-style cast combines const_cast
+            // with the pointer conversion in one step. The static_assert above
+            // guarantees T derives from I whenever this branch is executed.
+            read(is, (serialize::I*)(&t_));
+            return is;
+        }
+        else
+        {
+            // If T is not a class, handle built-in data types
+            if constexpr (std::is_pointer<T>::value == false)
+            {
+                if (readPrependedType)
+                {
+                    if (!read_type(is, Type::LITERAL))
+                    {
+                        return is;
+                    }
+                }
+
+                if (readPrependedType)
+                    parseStatus(typeid(t_), sizeof(t_));
+                read_internal(is, reinterpret_cast<char*>(&t_), sizeof(t_));
+                return is;
+            }
+            else
+            {
+                // Can't read pointers to built-in types
+                raiseError(ParsingError::INVALID_INPUT, __LINE__, __FILE__);
+                is.setstate(std::ios::failbit);
+                return is;
+            }
+        }
+#else
         // Is T a built-in data type (e.g. float, int, ...)?
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 6326)
+#endif
         if (std::is_class<T>::value == false)
         {
             // Is T is not a pointer type
@@ -615,6 +794,10 @@ public:
             read(is, (serialize::I*)(&t_));
             return is;
         }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+#endif
     }
 
     /// Write an object to a stream.
@@ -652,7 +835,7 @@ public:
         else
         {
             // If T is not a class, handle built-in data types
-            if (std::is_pointer<T>::value == false)
+            if constexpr (std::is_pointer<T>::value == false)
             {
                 if (prependType)
                 {
@@ -670,6 +853,10 @@ public:
         }
 #else
         // Is T type a built-in data type (e.g. float, int, ...)?
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 6326)
+#endif
         if (std::is_class<T>::value == false)
         {
             // Is T is not a pointer type
@@ -698,6 +885,9 @@ public:
             // is_class<T> is true, making the cast safe at runtime.
             return write(os, (serialize::I*)(&t_));
         }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 #endif
     }
 
@@ -707,11 +897,15 @@ public:
     /// @param[in] container - the vector container to write
     /// @return The output stream
     template <class T, class Alloc>
-    std::ostream& write(std::ostream& os, std::vector<T, Alloc>& container)
+    std::ostream& write(std::ostream& os, const std::vector<T, Alloc>& container)
     {
         static_assert(!serialize_traits::is_shared_ptr<T>::value, "Type T must not be a shared_ptr type");
 
-        assert(container.size() <= (std::numeric_limits<uint16_t>::max)());
+        if (container.size() > MAX_CONTAINER_SIZE) {
+            raiseError(ParsingError::CONTAINER_TOO_MANY, __LINE__, __FILE__);
+            os.setstate(std::ios::failbit);
+            return os;
+        }
         uint16_t size = static_cast<uint16_t>(container.size());
         write_type(os, Type::VECTOR);
         write(os, size, false);
@@ -719,7 +913,7 @@ public:
         {
             for (const auto& item : container)
             {
-                write(os, item, false);
+                write_element(os, item);
             }
         }
         return os;
@@ -746,10 +940,12 @@ public:
             if (check_stream(is) && check_container_size(is, size))
             {
                 parseStatus(typeid(container), size);
+                // One allocation of the final size instead of regrowing per element.
+                container.reserve(size);
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     T t;
-                    read(is, t, false);
+                    read_element(is, t);
                     container.push_back(t);
                 }
             }
@@ -763,11 +959,15 @@ public:
     /// @param[in] container - the vector container to write
     /// @return The output stream
     template <class T, class Alloc>
-    std::ostream& write(std::ostream& os, std::vector<T*, Alloc>& container)
+    std::ostream& write(std::ostream& os, const std::vector<T*, Alloc>& container)
     {
         static_assert(std::is_base_of<serialize::I, T>::value, "Type T must be derived from serialize::I");
 
-        assert(container.size() <= (std::numeric_limits<uint16_t>::max)());
+        if (container.size() > MAX_CONTAINER_SIZE) {
+            raiseError(ParsingError::CONTAINER_TOO_MANY, __LINE__, __FILE__);
+            os.setstate(std::ios::failbit);
+            return os;
+        }
         uint16_t size = static_cast<uint16_t>(container.size());
         write_type(os, Type::VECTOR);
         write(os, size, false);
@@ -816,6 +1016,8 @@ public:
             if (check_stream(is) && check_container_size(is, size))
             {
                 parseStatus(typeid(container), size);
+                // One allocation of the final size instead of regrowing per element.
+                container.reserve(size);
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     bool notNULL = false;
@@ -844,11 +1046,15 @@ public:
     /// @param[in] container - the map container to write
     /// @return The output stream
     template <class K, class V, class P, class Alloc>
-    std::ostream& write(std::ostream& os, std::map<K, V, P, Alloc>& container)
+    std::ostream& write(std::ostream& os, const std::map<K, V, P, Alloc>& container)
     {
         static_assert(!serialize_traits::is_shared_ptr<V>::value, "Type V must not be a shared_ptr type");
 
-        assert(container.size() <= (std::numeric_limits<uint16_t>::max)());
+        if (container.size() > MAX_CONTAINER_SIZE) {
+            raiseError(ParsingError::CONTAINER_TOO_MANY, __LINE__, __FILE__);
+            os.setstate(std::ios::failbit);
+            return os;
+        }
         uint16_t size = static_cast<uint16_t>(container.size());
         write_type(os, Type::MAP);
         write(os, size, false);
@@ -856,8 +1062,8 @@ public:
         {
             for (const auto& entry : container)
             {
-                write(os, entry.first, false);
-                write(os, entry.second, false);
+                write_element(os, entry.first);
+                write_element(os, entry.second);
             }
         }
         return os;
@@ -888,8 +1094,8 @@ public:
                 {
                     K key;
                     V value;
-                    read(is, key, false);
-                    read(is, value, false);
+                    read_element(is, key);
+                    read_element(is, value);
                     container[key] = value;
                 }
             }
@@ -903,20 +1109,24 @@ public:
     /// @param[in] container - the map container to write
     /// @return The output stream
     template <class K, class V, class P, class Alloc>
-    std::ostream& write(std::ostream& os, std::map<K, V*, P, Alloc>& container)
+    std::ostream& write(std::ostream& os, const std::map<K, V*, P, Alloc>& container)
     {
         static_assert(std::is_base_of<serialize::I, V>::value, "Type V must be derived from serialize::I");
 
-        assert(container.size() <= (std::numeric_limits<uint16_t>::max)());
+        if (container.size() > MAX_CONTAINER_SIZE) {
+            raiseError(ParsingError::CONTAINER_TOO_MANY, __LINE__, __FILE__);
+            os.setstate(std::ios::failbit);
+            return os;
+        }
         uint16_t size = static_cast<uint16_t>(container.size());
         write_type(os, Type::MAP);
         write(os, size, false);
 
         if (check_stream(os) && check_container_size(os, size))
         {
-            for (auto& entry : container)
+            for (const auto& entry : container)
             {
-                write(os, entry.first, false);
+                write_element(os, entry.first);
 
                 if (entry.second != nullptr)
                 {
@@ -960,7 +1170,7 @@ public:
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     K key;
-                    read(is, key, false);
+                    read_element(is, key);
                     bool notNULL;
                     read(is, notNULL, false);
                     if (notNULL)
@@ -986,11 +1196,15 @@ public:
     /// @param[in] container - the set container to write
     /// @return The output stream
     template <class T, class P, class Alloc>
-    std::ostream& write(std::ostream& os, std::set<T, P, Alloc>& container)
+    std::ostream& write(std::ostream& os, const std::set<T, P, Alloc>& container)
     {
         static_assert(!serialize_traits::is_shared_ptr<T>::value, "Type T must not be a shared_ptr type");
 
-        assert(container.size() <= (std::numeric_limits<uint16_t>::max)());
+        if (container.size() > MAX_CONTAINER_SIZE) {
+            raiseError(ParsingError::CONTAINER_TOO_MANY, __LINE__, __FILE__);
+            os.setstate(std::ios::failbit);
+            return os;
+        }
         uint16_t size = static_cast<uint16_t>(container.size());
         write_type(os, Type::SET);
         write(os, size, false);
@@ -999,7 +1213,7 @@ public:
         {
             for (const auto& item : container)
             {
-                write(os, item, false);
+                write_element(os, item);
             }
         }
         return os;
@@ -1029,7 +1243,7 @@ public:
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     T t;
-                    read(is, t, false);
+                    read_element(is, t);
                     container.insert(t);
                 }
             }
@@ -1043,11 +1257,15 @@ public:
     /// @param[in] container - the set container to write
     /// @return The output stream
     template <class T, class P, class Alloc>
-    std::ostream& write(std::ostream& os, std::set<T*, P, Alloc>& container)
+    std::ostream& write(std::ostream& os, const std::set<T*, P, Alloc>& container)
     {
         static_assert(std::is_base_of<serialize::I, T>::value, "Type T must be derived from serialize::I");
 
-        assert(container.size() <= (std::numeric_limits<uint16_t>::max)());
+        if (container.size() > MAX_CONTAINER_SIZE) {
+            raiseError(ParsingError::CONTAINER_TOO_MANY, __LINE__, __FILE__);
+            os.setstate(std::ios::failbit);
+            return os;
+        }
         uint16_t size = static_cast<uint16_t>(container.size());
         write_type(os, Type::SET);
         write(os, size, false);
@@ -1121,11 +1339,15 @@ public:
     /// @param[in] container - the list container to write
     /// @return The output stream
     template <class T, class Alloc>
-    std::ostream& write(std::ostream& os, std::list<T, Alloc>& container)
+    std::ostream& write(std::ostream& os, const std::list<T, Alloc>& container)
     {
         static_assert(!serialize_traits::is_shared_ptr<T>::value, "Type T must not be a shared_ptr type");
 
-        assert(container.size() <= (std::numeric_limits<uint16_t>::max)());
+        if (container.size() > MAX_CONTAINER_SIZE) {
+            raiseError(ParsingError::CONTAINER_TOO_MANY, __LINE__, __FILE__);
+            os.setstate(std::ios::failbit);
+            return os;
+        }
         uint16_t size = static_cast<uint16_t>(container.size());
         write_type(os, Type::LIST);
         write(os, size, false);
@@ -1134,7 +1356,7 @@ public:
         {
             for (const auto& item : container)
             {
-                write(os, item, false);
+                write_element(os, item);
             }
         }
         return os;
@@ -1164,7 +1386,7 @@ public:
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     T t;
-                    read(is, t, false);
+                    read_element(is, t);
                     container.push_back(t);
                 }
             }
@@ -1178,11 +1400,15 @@ public:
     /// @param[in] container - the list container to write
     /// @return The output stream
     template <class T, class Alloc>
-    std::ostream& write(std::ostream& os, std::list<T*, Alloc>& container)
+    std::ostream& write(std::ostream& os, const std::list<T*, Alloc>& container)
     {
         static_assert(std::is_base_of<serialize::I, T>::value, "Type T must be derived from serialize::I");
 
-        assert(container.size() <= (std::numeric_limits<uint16_t>::max)());
+        if (container.size() > MAX_CONTAINER_SIZE) {
+            raiseError(ParsingError::CONTAINER_TOO_MANY, __LINE__, __FILE__);
+            os.setstate(std::ios::failbit);
+            return os;
+        }
         uint16_t size = static_cast<uint16_t>(container.size());
         write_type(os, Type::LIST);
         write(os, size, false);
@@ -1251,6 +1477,120 @@ public:
         return is;
     }
 
+    /// Write a std::array. Uses the VECTOR type marker on purpose (no separate ARRAY
+    /// type), so the bytes match a std::vector and one side can declare the field as
+    /// std::vector<T> while the other uses std::array<T, N>. The element count on the
+    /// wire is what catches a mismatch: the array read requires exactly N. A fixed-size
+    /// array needs no allocation, which suits fixed-block / no-heap targets.
+    /// @param[in] os - the output stream
+    /// @param[in] container - the array to write
+    /// @return The output stream
+    template <class T, size_t N>
+    std::ostream& write(std::ostream& os, const std::array<T, N>& container)
+    {
+        static_assert(N <= MAX_CONTAINER_SIZE, "std::array larger than MSG_SERIALIZE_MAX_CONTAINER_SIZE");
+        static_assert(!std::is_pointer<T>::value, "std::array of pointers is not supported");
+        write_type(os, Type::VECTOR);
+        uint16_t size = static_cast<uint16_t>(N);
+        write(os, size, false);
+        if (check_stream(os))
+        {
+            for (const auto& item : container)
+                write_element(os, item);
+        }
+        return os;
+    }
+
+    /// Read into a std::array. Accepts the VECTOR type marker, so it reads data
+    /// written from a std::vector or a std::array. The received element count must
+    /// equal N; otherwise the read fails (INVALID_INPUT) and the array is unchanged.
+    /// A list, set or map fails with TYPE_MISMATCH.
+    /// @param[in] is - the input stream
+    /// @param[in] container - the array to read into
+    /// @return The input stream
+    template <class T, size_t N>
+    std::istream& read(std::istream& is, std::array<T, N>& container)
+    {
+        static_assert(N <= MAX_CONTAINER_SIZE, "std::array larger than MSG_SERIALIZE_MAX_CONTAINER_SIZE");
+        static_assert(!std::is_pointer<T>::value, "std::array of pointers is not supported");
+
+        if (check_stop_parse(is))
+            return is;
+
+        if (read_type(is, Type::VECTOR))
+        {
+            uint16_t size = 0;
+            read(is, size, false);
+            if (check_stream(is) && check_container_size(is, size))
+            {
+                if (size != N)
+                {
+                    raiseError(ParsingError::INVALID_INPUT, __LINE__, __FILE__);
+                    is.setstate(std::ios::failbit);
+                    return is;
+                }
+                parseStatus(typeid(container), size);
+                for (auto& item : container)
+                    read_element(is, item);
+            }
+        }
+        return is;
+    }
+
+    // Non-const containers forward to the const overloads above. Without these,
+    // a non-const container binds better to the generic write(os, T&, bool)
+    // template than to a const overload, and fails its static_assert.
+    std::ostream& write(std::ostream& os, std::vector<bool>& container)
+    {
+        return write(os, static_cast<const std::vector<bool>&>(container));
+    }
+    template <class T, class Alloc>
+    std::ostream& write(std::ostream& os, std::vector<T, Alloc>& container)
+    {
+        return write(os, static_cast<const std::vector<T, Alloc>&>(container));
+    }
+    template <class T, class Alloc>
+    std::ostream& write(std::ostream& os, std::vector<T*, Alloc>& container)
+    {
+        return write(os, static_cast<const std::vector<T*, Alloc>&>(container));
+    }
+    template <class K, class V, class P, class Alloc>
+    std::ostream& write(std::ostream& os, std::map<K, V, P, Alloc>& container)
+    {
+        return write(os, static_cast<const std::map<K, V, P, Alloc>&>(container));
+    }
+    template <class K, class V, class P, class Alloc>
+    std::ostream& write(std::ostream& os, std::map<K, V*, P, Alloc>& container)
+    {
+        return write(os, static_cast<const std::map<K, V*, P, Alloc>&>(container));
+    }
+    template <class T, class P, class Alloc>
+    std::ostream& write(std::ostream& os, std::set<T, P, Alloc>& container)
+    {
+        return write(os, static_cast<const std::set<T, P, Alloc>&>(container));
+    }
+    template <class T, class P, class Alloc>
+    std::ostream& write(std::ostream& os, std::set<T*, P, Alloc>& container)
+    {
+        return write(os, static_cast<const std::set<T*, P, Alloc>&>(container));
+    }
+    template <class T, class Alloc>
+    std::ostream& write(std::ostream& os, std::list<T, Alloc>& container)
+    {
+        return write(os, static_cast<const std::list<T, Alloc>&>(container));
+    }
+    template <class T, class Alloc>
+    std::ostream& write(std::ostream& os, std::list<T*, Alloc>& container)
+    {
+        return write(os, static_cast<const std::list<T*, Alloc>&>(container));
+    }
+
+    template <class T, size_t N>
+    std::ostream& write(std::ostream& os, std::array<T, N>& container)
+    {
+        return write(os, static_cast<const std::array<T, N>&>(container));
+    }
+
     typedef void (*ErrorHandler)(ParsingError error, int line, const char* file);
     void setErrorHandler(ErrorHandler error_handler_)
     {
@@ -1267,6 +1607,95 @@ public:
     }
 
 private:
+    /// Write/read one container element (or map key). Strings and nested
+    /// containers go to their own overloads (with their type prefix and size);
+    /// everything else to write()/read() without a type prefix. A 3-argument
+    /// write(os, x, false) on a string or container would pick the generic
+    /// template instead, which only handles literals and serialize::I types.
+    template <typename C, typename Traits, typename Alloc>
+    std::ostream& write_element(std::ostream& os, const std::basic_string<C, Traits, Alloc>& s)
+    {
+        return write(os, s);
+    }
+
+    template <class T, class Alloc>
+    std::ostream& write_element(std::ostream& os, const std::vector<T, Alloc>& c)
+    {
+        return write(os, c);
+    }
+
+    template <class T, class Alloc>
+    std::ostream& write_element(std::ostream& os, const std::list<T, Alloc>& c)
+    {
+        return write(os, c);
+    }
+
+    template <class T, class P, class Alloc>
+    std::ostream& write_element(std::ostream& os, const std::set<T, P, Alloc>& c)
+    {
+        return write(os, c);
+    }
+
+    template <class K, class V, class P, class Alloc>
+    std::ostream& write_element(std::ostream& os, const std::map<K, V, P, Alloc>& c)
+    {
+        return write(os, c);
+    }
+
+    template <class T, size_t N>
+    std::ostream& write_element(std::ostream& os, const std::array<T, N>& c)
+    {
+        return write(os, c);
+    }
+
+    template <typename T>
+    std::ostream& write_element(std::ostream& os, const T& t_)
+    {
+        return write(os, t_, false);
+    }
+
+    template <typename C, typename Traits, typename Alloc>
+    std::istream& read_element(std::istream& is, std::basic_string<C, Traits, Alloc>& s)
+    {
+        return read(is, s);
+    }
+
+    template <class T, class Alloc>
+    std::istream& read_element(std::istream& is, std::vector<T, Alloc>& c)
+    {
+        return read(is, c);
+    }
+
+    template <class T, class Alloc>
+    std::istream& read_element(std::istream& is, std::list<T, Alloc>& c)
+    {
+        return read(is, c);
+    }
+
+    template <class T, class P, class Alloc>
+    std::istream& read_element(std::istream& is, std::set<T, P, Alloc>& c)
+    {
+        return read(is, c);
+    }
+
+    template <class K, class V, class P, class Alloc>
+    std::istream& read_element(std::istream& is, std::map<K, V, P, Alloc>& c)
+    {
+        return read(is, c);
+    }
+
+    template <class T, size_t N>
+    std::istream& read_element(std::istream& is, std::array<T, N>& c)
+    {
+        return read(is, c);
+    }
+
+    template <typename T>
+    std::istream& read_element(std::istream& is, T& t_)
+    {
+        return read(is, t_, false);
+    }
+
     /// Read from stream into caller's character buffer.
     /// Wire format is little-endian. On a big-endian host the bytes are reversed
     /// after the read so that multi-byte values are correctly stored in memory.
@@ -1327,16 +1756,17 @@ private:
         return os;
     }
 
-    // Maximum sizes allowed by parser
-    static const uint16_t MAX_STRING_SIZE = 256;
-    static const uint16_t MAX_CONTAINER_SIZE = 200;
+    // Maximum sizes allowed by parser (MSG_SERIALIZE_* above)
+    static constexpr uint16_t MAX_STRING_SIZE = MSG_SERIALIZE_MAX_STRING_SIZE;
+    static constexpr uint16_t MAX_CONTAINER_SIZE = MSG_SERIALIZE_MAX_CONTAINER_SIZE;
 
     // Keep wchar_t serialize size consistent on any platform
     static const size_t WCHAR_SIZE = 2;
 
     // LIFO stack used to track stop-parse positions for versioned object reads.
-    // std::vector gives O(1) push/pop with no per-element heap allocation.
-    std::vector<std::streampos> stopParsePosStack;
+    static constexpr size_t MAX_PARSE_STACK_DEPTH = MSG_SERIALIZE_MAX_NESTING;
+    std::array<std::streampos, MAX_PARSE_STACK_DEPTH> stopParsePosStack;
+    size_t stopParsePosIdx = 0;
 
     ErrorHandler error_handler = nullptr;
     ParsingError lastError = ParsingError::NONE;
@@ -1429,17 +1859,26 @@ private:
         return ptr != nullptr;
     }
 
-    void push_stop_parse_pos(std::streampos stopParsePos)
+    // Returns false if the stack is full (nesting too deep) instead of faulting —
+    // reachable from remote/untrusted input (deserializing a USER_DEFINED object
+    // nested more than MAX_PARSE_STACK_DEPTH levels deep), so a malformed message
+    // must fail that one parse, not hard-fault the process. Caller must not call
+    // pop_stop_parse_pos() for a push that returned false.
+    bool push_stop_parse_pos(std::streampos stopParsePos)
     {
-        stopParsePosStack.push_back(stopParsePos);
+        if (stopParsePosIdx >= MAX_PARSE_STACK_DEPTH)
+            return false;
+        stopParsePosStack[stopParsePosIdx++] = stopParsePos;
+        return true;
     }
 
+    // Every call site pairs this 1:1 with a push_stop_parse_pos() that returned
+    // true, so an empty stack here means internal state corruption, not malformed
+    // input — stays a hard fault.
     std::streampos pop_stop_parse_pos()
     {
-        assert(!stopParsePosStack.empty());
-        std::streampos stopParsePos = stopParsePosStack.back();
-        stopParsePosStack.pop_back();
-        return stopParsePos;
+        assert(stopParsePosIdx > 0);
+        return stopParsePosStack[--stopParsePosIdx];
     }
 
     bool check_stop_parse(std::istream& is)
@@ -1449,9 +1888,9 @@ private:
             raiseError(ParsingError::END_OF_FILE, __LINE__, __FILE__);
             return true;
         }
-        if (!stopParsePosStack.empty())
+        if (stopParsePosIdx > 0)
         {
-            std::streampos stopParsePos = stopParsePosStack.back();
+            std::streampos stopParsePos = stopParsePosStack[stopParsePosIdx - 1];
             if (is.tellg() >= stopParsePos)
             {
                 return true;
