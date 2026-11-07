@@ -25,7 +25,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4  # Checkout the repository code
+      uses: actions/checkout@v7  # Checkout the repository code
 
     - name: Configure CMake
       run: cmake -S . -B build -DMSG_SERIALIZE_ALLOCATOR=${{ matrix.allocator }} # Configure CMake to generate build files in 'build' directory

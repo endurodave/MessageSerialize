@@ -25,10 +25,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4  # Checkout the repository code
-
-    - name: Set up Visual Studio
-      uses: microsoft/setup-msbuild@v2  # Set up Visual Studio environment (MSBuild)
+      uses: actions/checkout@v7  # Checkout the repository code
 
     - name: Configure CMake
       run: cmake -S . -B build -DMSG_SERIALIZE_ALLOCATOR=${{ matrix.allocator }}  # Default generator: the installed Visual Studio
