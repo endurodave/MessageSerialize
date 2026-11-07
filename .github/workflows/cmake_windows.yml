@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest  # Use Windows environment for the build
+    runs-on: windows-2022  # Pinned: windows-latest no longer has Visual Studio 2022
     name: build (${{ matrix.memory }})
     strategy:
       fail-fast: false
@@ -31,7 +31,7 @@ jobs:
       uses: microsoft/setup-msbuild@v2  # Set up Visual Studio environment (MSBuild)
 
     - name: Configure CMake
-      run: cmake -S . -B build -G "Visual Studio 17 2022" -DMSG_SERIALIZE_ALLOCATOR=${{ matrix.allocator }} # Configure CMake for Visual Studio
+      run: cmake -S . -B build -DMSG_SERIALIZE_ALLOCATOR=${{ matrix.allocator }}  # Default generator: the installed Visual Studio
 
     - name: Build
       run: cmake --build build --config Release  # Build the project using CMake with Release configuration
