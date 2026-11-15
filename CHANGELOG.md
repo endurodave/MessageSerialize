@@ -7,9 +7,12 @@ Versions correspond to git tags.
 
 ---
 
-## [Unreleased]
+## [1.1.0] - 2026-11-15
 
 ### Added
+
+- **PlatformIO package** (`library.json`, header only) and the `examples/platformio/msg-serialize-demo` example for ESP32, ESP32-C3, STM32 Nucleo-F401RE, STM32F4 Discovery, Raspberry Pi Pico and native, built by a new PlatformIO workflow.
+- **Builds without RTTI** (`-fno-rtti`, as on the STM32 and RP2040 Arduino cores): `MSG_SERIALIZE_RTTI` is detected automatically, and without RTTI the parse handler isn't called. Previously the header didn't compile there.
 
 - **`std::array<T, N>`**, the allocation-free choice for message fields on no-heap targets. It's sent exactly like a `std::vector`, so one end can use `std::vector<T>` and the other `std::array<T, N>` for the same field; reading fails with `INVALID_INPUT` if the received count isn't `N`. `N` above `MSG_SERIALIZE_MAX_CONTAINER_SIZE` is a compile error.
 - **Nested containers**, e.g. `std::vector<std::vector<int>>`, `std::map<std::string, std::vector<int>>`, `std::list<std::vector<std::string>>`. Each inner container is checked against the container limit on its own.
@@ -81,7 +84,7 @@ First tagged release.
 - `make_serialized()` / `make_unserialized()` helpers to write or read several values in one call.
 - GitHub workflows for Windows, Ubuntu (GCC) and Clang.
 
-[Unreleased]: https://github.com/endurodave/MessageSerialize/compare/v1.0.2...HEAD
+[1.1.0]: https://github.com/endurodave/MessageSerialize/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/endurodave/MessageSerialize/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/endurodave/MessageSerialize/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/endurodave/MessageSerialize/releases/tag/v1.0.0

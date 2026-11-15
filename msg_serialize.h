@@ -84,6 +84,27 @@
 #define MSG_SERIALIZE_MAX_NESTING 8
 #endif
 
+/// 1 if RTTI is available. setParseHandler() reports each value's
+/// std::type_info, which needs typeid. Many embedded toolchains build with
+/// -fno-rtti (e.g. STM32 and RP2040 Arduino cores); there the parse handler is
+/// never called and everything else works the same. Detected automatically;
+/// define as 0 or 1 to override.
+#ifndef MSG_SERIALIZE_RTTI
+    #if defined(__GXX_RTTI) || defined(_CPPRTTI) || defined(__cpp_rtti)
+        #define MSG_SERIALIZE_RTTI 1
+    #elif defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER)
+        #define MSG_SERIALIZE_RTTI 0
+    #else
+        #define MSG_SERIALIZE_RTTI 1
+    #endif
+#endif
+
+#if MSG_SERIALIZE_RTTI
+    #define MSG_SERIALIZE_PARSE_STATUS(value, size) parseStatus(typeid(value), size)
+#else
+    #define MSG_SERIALIZE_PARSE_STATUS(value, size) ((void)(size))
+#endif
+
 static_assert(MSG_SERIALIZE_MAX_STRING_SIZE <= 65535 && MSG_SERIALIZE_MAX_CONTAINER_SIZE <= 65535,
     "msg_serialize length fields are 16 bits");
 static_assert(MSG_SERIALIZE_MAX_NESTING >= 1, "MSG_SERIALIZE_MAX_NESTING must be at least 1");
@@ -324,7 +345,7 @@ public:
                     return is;
                 }
 
-                parseStatus(typeid(*t_), size);
+                MSG_SERIALIZE_PARSE_STATUS(*t_, size);
 
                 // Save the stop parsing position to prevent parsing overrun
                 if (!push_stop_parse_pos(targetStopPos)) {
@@ -374,7 +395,7 @@ public:
             if (check_stream(is) && check_slength(is, size))
             {
                 s.resize(size);
-                parseStatus(typeid(s), s.size());
+                MSG_SERIALIZE_PARSE_STATUS(s, s.size());
                 read_internal(is, &s[0], size, true);
             }
         }
@@ -399,7 +420,7 @@ public:
             if (check_stream(is) && check_slength(is, size))
             {
                 s.resize(size);
-                parseStatus(typeid(s), s.size());
+                MSG_SERIALIZE_PARSE_STATUS(s, s.size());
                 for (uint16_t ii = 0; ii < size; ii++)
                 {
                     wchar_t c = 0;
@@ -447,7 +468,7 @@ public:
                 is.setstate(std::ios::failbit);
                 return is;
             }
-            parseStatus(typeid(str), size);
+            MSG_SERIALIZE_PARSE_STATUS(str, size);
             read_internal(is, str, size, true);
 
             // Truncated stream: is.read() stopped early, so str[gcount()..size-1]
@@ -498,7 +519,7 @@ public:
             read(is, size, false);
             if (check_stream(is) && check_container_size(is, size))
             {
-                parseStatus(typeid(container), size);
+                MSG_SERIALIZE_PARSE_STATUS(container, size);
                 // One allocation of the final size instead of regrowing per element.
                 container.reserve(size);
                 for (uint16_t i = 0; i < size; ++i)
@@ -740,7 +761,7 @@ public:
                 }
 
                 if (readPrependedType)
-                    parseStatus(typeid(t_), sizeof(t_));
+                    MSG_SERIALIZE_PARSE_STATUS(t_, sizeof(t_));
                 read_internal(is, reinterpret_cast<char*>(&t_), sizeof(t_));
                 return is;
             }
@@ -772,7 +793,7 @@ public:
                 }
 
                 if (readPrependedType)
-                    parseStatus(typeid(t_), sizeof(t_));
+                    MSG_SERIALIZE_PARSE_STATUS(t_, sizeof(t_));
                 read_internal(is, reinterpret_cast<char*>(&t_), sizeof(t_));
                 return is;
             }
@@ -939,7 +960,7 @@ public:
             read(is, size, false);
             if (check_stream(is) && check_container_size(is, size))
             {
-                parseStatus(typeid(container), size);
+                MSG_SERIALIZE_PARSE_STATUS(container, size);
                 // One allocation of the final size instead of regrowing per element.
                 container.reserve(size);
                 for (uint16_t i = 0; i < size; ++i)
@@ -1015,7 +1036,7 @@ public:
             read(is, size, false);
             if (check_stream(is) && check_container_size(is, size))
             {
-                parseStatus(typeid(container), size);
+                MSG_SERIALIZE_PARSE_STATUS(container, size);
                 // One allocation of the final size instead of regrowing per element.
                 container.reserve(size);
                 for (uint16_t i = 0; i < size; ++i)
@@ -1089,7 +1110,7 @@ public:
             read(is, size, false);
             if (check_stream(is) && check_container_size(is, size))
             {
-                parseStatus(typeid(container), size);
+                MSG_SERIALIZE_PARSE_STATUS(container, size);
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     K key;
@@ -1166,7 +1187,7 @@ public:
             read(is, size, false);
             if (check_stream(is) && check_container_size(is, size))
             {
-                parseStatus(typeid(container), size);
+                MSG_SERIALIZE_PARSE_STATUS(container, size);
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     K key;
@@ -1239,7 +1260,7 @@ public:
             read(is, size, false);
             if (check_stream(is) && check_container_size(is, size))
             {
-                parseStatus(typeid(container), size);
+                MSG_SERIALIZE_PARSE_STATUS(container, size);
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     T t;
@@ -1311,7 +1332,7 @@ public:
             read(is, size, false);
             if (check_stream(is) && check_container_size(is, size))
             {
-                parseStatus(typeid(container), size);
+                MSG_SERIALIZE_PARSE_STATUS(container, size);
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     bool notNULL = false;
@@ -1382,7 +1403,7 @@ public:
             read(is, size, false);
             if (check_stream(is) && check_container_size(is, size))
             {
-                parseStatus(typeid(container), size);
+                MSG_SERIALIZE_PARSE_STATUS(container, size);
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     T t;
@@ -1455,7 +1476,7 @@ public:
             read(is, size, false);
             if (check_stream(is) && check_container_size(is, size))
             {
-                parseStatus(typeid(container), size);
+                MSG_SERIALIZE_PARSE_STATUS(container, size);
                 for (uint16_t i = 0; i < size; ++i)
                 {
                     bool notNULL = false;
@@ -1529,7 +1550,7 @@ public:
                     is.setstate(std::ios::failbit);
                     return is;
                 }
-                parseStatus(typeid(container), size);
+                MSG_SERIALIZE_PARSE_STATUS(container, size);
                 for (auto& item : container)
                     read_element(is, item);
             }
