@@ -1,0 +1,32 @@
+{
+  "name": "MessageSerialize",
+  "version": "1.1.0",
+  "description": "Header-only C++14 binary serialization for messages: primitives, strings, STL containers and nested user types, little-endian wire format, protocol versioning, bounded input. For communication protocols on embedded and desktop systems.",
+  "keywords": ["serialization", "serialize", "binary", "message", "protocol", "stl", "embedded", "header-only"],
+  "repository": { "type": "git", "url": "https://github.com/endurodave/MessageSerialize.git" },
+  "authors": [{ "name": "David Lafreniere", "url": "https://github.com/endurodave", "maintainer": true }],
+  "license": "MIT",
+  "homepage": "https://github.com/endurodave/MessageSerialize",
+  "frameworks": "*",
+  "platforms": "*",
+  "headers": "msg_serialize.h",
+  "export": {
+    "include": [
+      "msg_serialize.h", "LICENSE", "README.md", "CHANGELOG.md", "library.json",
+      "examples/platformio/msg-serialize-demo/platformio.ini",
+      "examples/platformio/msg-serialize-demo/src/main.cpp"
+    ]
+  },
+  "build": {
+    "srcDir": ".",
+    "includeDir": ".",
+    "srcFilter": ["-<*>"]
+  },
+  "examples": [
+    {
+      "name": "msg-serialize-demo",
+      "base": "examples/platformio/msg-serialize-demo",
+      "files": ["platformio.ini", "src/main.cpp"]
+    }
+  ]
+}

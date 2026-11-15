@@ -1,7 +1,8 @@
-![License MIT](https://img.shields.io/github/license/BehaviorTree/BehaviorTree.CPP?color=blue)
+![License MIT](https://img.shields.io/github/license/endurodave/MessageSerialize?color=blue)
 [![conan Ubuntu](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_ubuntu.yml/badge.svg)](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_ubuntu.yml)
 [![conan Ubuntu](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_clang.yml/badge.svg)](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_clang.yml)
 [![conan Windows](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_windows.yml/badge.svg)](https://github.com/endurodave/MessageSerialize/actions/workflows/cmake_windows.yml)
+[![PlatformIO](https://github.com/endurodave/MessageSerialize/actions/workflows/platformio.yml/badge.svg)](https://github.com/endurodave/MessageSerialize/actions/workflows/platformio.yml)
 
 # Message Serialize
 A simple serialize class to binary serialize and deserialize C++ objects.
@@ -305,6 +306,26 @@ The GitHub workflows (Windows, Ubuntu GCC, Clang) build and run both the global 
 
 Only `msg_serialize.h` is needed to use the library; `allocator/` is optional.
 
+## PlatformIO
+
+`MessageSerialize` is in the [PlatformIO registry](https://registry.platformio.org/libraries/endurodave/MessageSerialize). Add it to your project's `platformio.ini`:
+
+```ini
+lib_deps = endurodave/MessageSerialize@^1.1.0
+```
+
+Then `#include "msg_serialize.h"`. The package is the header only; the optional `allocator/` directory isn't included. For fixed-block containers on a device, [stl_allocator](https://github.com/endurodave/stl_allocator) (`endurodave/stl_allocator`) works with it, since strings and containers with any allocator serialize the same way.
+
+It needs a C++14 compiler with the C++ standard library: ESP32, STM32, RP2040 and the desktop (`platform = native`), but not 8-bit AVR. On toolchains built without RTTI (`-fno-rtti`, e.g. the STM32 and RP2040 Arduino cores) the parse handler isn't called; see [Error Handling](https://github.com/endurodave/MessageSerialize#error-handling). The C++ stream library is large on a microcontroller: the example uses about 180 KB of flash on STM32, most of it `<sstream>`.
+
+The [msg-serialize-demo](https://github.com/endurodave/MessageSerialize/tree/main/examples/platformio/msg-serialize-demo) example writes a message with a nested object, string, `std::array`, `std::vector` and `std::map`, reads it back and checks it, and shows a truncated message being reported. It runs on ESP32, ESP32-C3, STM32 Nucleo-F401RE, STM32F4 Discovery, Raspberry Pi Pico and the desktop:
+
+```shell
+cd examples/platformio/msg-serialize-demo
+pio run -e esp32dev -t upload -t monitor
+pio run -e native -t exec
+```
+
 ## Fixed-Block Allocator
 
 The optional `allocator/` directory is a fixed-block memory allocator, for embedded systems where the global heap is unavailable, too slow or fragments. It comes from [DelegateMQ](https://github.com/DelegateMQ/DelegateMQ) and keeps its names (namespace `dmq`, `DMQ_*` macros), but needs nothing else from it. See [allocator/README.md](allocator/README.md).
@@ -393,6 +414,8 @@ int main(void)
     return 0;
 }
 ```
+The parse handler needs RTTI (it reports each value's `std::type_info`). Without RTTI (`-fno-rtti`), `MSG_SERIALIZE_RTTI` is 0 and the parse handler is never called; the error handler works either way. RTTI is detected automatically; define `MSG_SERIALIZE_RTTI` as 0 or 1 to override.
+
 Check for errors with `getLastError()` to get the last parse error code.
 
 A failed read or write also sets the stream's `failbit`, so checking `is.good()` / `os.good()` after a call is enough to detect any error.
